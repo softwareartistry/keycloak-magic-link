@@ -1,5 +1,7 @@
 package io.phasetwo.keycloak.magic.auth.magic.continuation;
 
+import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_LAST_POLLED;
+
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -9,6 +11,7 @@ import jakarta.ws.rs.core.Response;
 import java.time.Instant;
 import java.util.Map;
 import lombok.extern.jbosslog.JBossLog;
+import org.keycloak.common.util.Time;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.services.resource.RealmResourceProvider;
@@ -58,11 +61,16 @@ public class MagicLinkContinuationStatusProvider implements RealmResourceProvide
     AuthenticationSessionModel authSession = findAuthSessionByIds(realm, sessionId, tabId);
 
     if (authSession == null) {
-      log.debugf("[MLC] Auth session not found (likely consumed), returning 404 for tabId: %s", tabId);
+      log.debugf(
+          "[MLC] Auth session not found (likely consumed), returning 404 for tabId: %s", tabId);
       return Response.status(Response.Status.NOT_FOUND)
           .entity(Map.of("error", "Session not found or already consumed"))
           .build();
     }
+
+    // heartbeat: record that the polling (original) tab is still alive, so the link handler can
+    // distinguish an active tab from an abandoned one before confirming the login.
+    authSession.setAuthNote(MLC_LAST_POLLED, String.valueOf(Time.currentTime()));
 
     String note = authSession.getAuthNote(AUTH_NOTE_STATE);
     String sessionConfirmed = authSession.getAuthNote("SESSION_CONFIRMED");

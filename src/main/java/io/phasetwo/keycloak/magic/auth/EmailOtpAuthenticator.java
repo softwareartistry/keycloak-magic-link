@@ -30,6 +30,7 @@ public class EmailOtpAuthenticator implements Authenticator {
   public static final String USER_AUTH_NOTE_OTP_CODE = "user-auth-note-otp-code";
   public static final String FORM_PARAM_OTP_CODE = "otp";
 
+  @Override
   public void authenticate(AuthenticationFlowContext context) {
     challenge(context, null, false);
   }
@@ -80,7 +81,7 @@ public class EmailOtpAuthenticator implements Authenticator {
         MagicLink.registerEvent(event, EMAIL_OTP));
 
       if (user == null) {
-        log.debugf("User with email %s not found.", context.getUser().getEmail());
+        log.infof("User with email %s not found.", email);
         return;
       }
 
@@ -94,6 +95,7 @@ public class EmailOtpAuthenticator implements Authenticator {
     }
   }
 
+  @Override
   public void action(AuthenticationFlowContext context) {
     log.debug("EmailOtpAuthenticator.action");
 

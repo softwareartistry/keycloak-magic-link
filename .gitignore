@@ -10,3 +10,9 @@ NOTES
 .factorypath
 .project
 .settings/
+.claude
+
+node_modules
+src/test/e2e/cypress/reports
+src/test/e2e/cypress/videos
+src/test/e2e/cypress/screenshots

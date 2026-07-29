@@ -28,6 +28,135 @@ The authenticator can be configured to create a user with the given email addres
 
 ![Configure Magic Link Authenticator with options](docs/assets/magic-link-config.png)
 
+### Customization (SPI)
+
+The core implementation is **closed for modification and open for extension**. All implementation classes (`MagicLinkAuthenticator`, `MagicLinkActionTokenHandler`) are `final` — do not fork this repository to patch them. Instead, **import this artifact as a Java library** in your own Keycloak extension project and extend it through the SPI:
+
+```xml
+<dependency>
+  <groupId>io.phasetwo.keycloak</groupId>
+  <artifactId>keycloak-magic-link</artifactId>
+  <version>VERSION</version>
+</dependency>
+```
+
+Custom behaviour is added by implementing two SPI interfaces and wiring them into a new authenticator factory subclass. The built-in defaults handle the common case — replace only what your use case requires.
+
+#### How it fits together
+
+```
+AbstractMagicLinkAuthenticatorFactory  (subclass this)
+  └── MagicLinkAuthenticator           (final — do not subclass)
+        └── MagicLinkCustomizationProvider  (implement this interface)
+              ├── canAuthenticate()    ← gate the flow (org check, role check, …)
+              └── sendMagicLinkEmail() ← use built-in template or your own
+```
+
+#### Step 1 — Implement `MagicLinkCustomizationProvider`
+
+```java
+public final class AcmeMagicLinkCustomizationProvider implements MagicLinkCustomizationProvider {
+
+    private final KeycloakSession session;
+
+    AcmeMagicLinkCustomizationProvider(KeycloakSession session) {
+        this.session = session;
+    }
+
+    @Override
+    public boolean canAuthenticate(AuthenticationFlowContext context, UserModel user, MagicLinkConfig config) {
+        // Return false (and set a challenge) to abort — e.g. role check, org membership
+        if (user.getRoleMappingsStream().noneMatch(r -> "acme-user".equals(r.getName()))) {
+            Response deny = context.form()
+                .setError("notAllowed")
+                .createErrorPage(Response.Status.FORBIDDEN);
+            context.failure(AuthenticationFlowError.ACCESS_DENIED, deny);
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean sendMagicLinkEmail(KeycloakSession session, UserModel user, String link, MagicLinkConfig config) {
+        return MagicLink.sendMagicLinkEmail(session, user, link); // built-in template; swap for your own
+    }
+
+    @Override
+    public void close() {}
+}
+```
+
+#### Step 2 — Implement `MagicLinkCustomizationProviderFactory`
+
+```java
+public final class AcmeMagicLinkCustomizationProviderFactory implements MagicLinkCustomizationProviderFactory {
+
+    @Override
+    public MagicLinkCustomizationProvider create(KeycloakSession session, Map<String, String> authenticatorConfig) {
+        return new AcmeMagicLinkCustomizationProvider(session);
+    }
+
+    @Override
+    public List<ProviderConfigProperty> getConfigProperties() {
+        return List.of(); // add ProviderConfigProperty entries to expose admin-UI config fields
+    }
+}
+```
+
+#### Step 3 — Wire into an authenticator factory
+
+Subclass `AbstractMagicLinkAuthenticatorFactory` and annotate with `@AutoService`. The `PROVIDER_ID` must be unique across your Keycloak installation.
+
+```java
+@AutoService(AuthenticatorFactory.class)
+public final class AcmeMagicLinkAuthenticatorFactory extends AbstractMagicLinkAuthenticatorFactory {
+
+    public static final String PROVIDER_ID = "ext-magic-acme";
+
+    public AcmeMagicLinkAuthenticatorFactory() {
+        super(new AcmeMagicLinkCustomizationProviderFactory());
+    }
+
+    @Override public String getId()          { return PROVIDER_ID; }
+    @Override public String getDisplayType() { return "Magic Link (Acme)"; }
+    @Override public String getHelpText()    { return "Magic link restricted to Acme users."; }
+}
+```
+
+After building and deploying the JAR, **"Magic Link (Acme)"** appears in the Keycloak admin console alongside the default **"Magic Link"** option. Each variant is configured independently and can be used in any browser flow.
+
+#### Exposing admin-UI config fields
+
+`getConfigProperties()` in your factory returns additional `ProviderConfigProperty` entries that are appended to the authenticator's configuration panel in the admin UI, after the built-in properties.
+
+```java
+@Override
+public List<ProviderConfigProperty> getConfigProperties() {
+    ProviderConfigProperty orgId = new ProviderConfigProperty();
+    orgId.setType(ProviderConfigProperty.STRING_TYPE);
+    orgId.setName("acme-org-id");
+    orgId.setLabel("Organization ID");
+    orgId.setHelpText("Only members of this organization may receive a magic link.");
+    return List.of(orgId);
+}
+```
+
+The same config map is passed to `create(session, authenticatorConfig)` at runtime:
+
+```java
+@Override
+public MagicLinkCustomizationProvider create(KeycloakSession session, Map<String, String> authenticatorConfig) {
+    String orgId = authenticatorConfig.get("acme-org-id");
+    return new AcmeMagicLinkCustomizationProvider(session, orgId);
+}
+```
+
+#### Built-in default
+
+When no customization is needed the provided `DefaultMagicLinkCustomizationProviderFactory` is used automatically. It allows all users through `canAuthenticate` and delegates to the built-in `magic-link-email.ftl` template.
+
+---
+
 ## Magic link continuation
 
 This Magic link continuation authenticator is similar to the Magic Link authenticator in implementation, but has a different behavior. Instead of creating a session on the device where the link is clicked, the flow continues the login on the initial login page. The login page is polling the authentication page each 5 seconds until the session is confirmed or the authentication flow expires. The default expiration for the Magic link continuation flow is 10 minutes.
@@ -44,15 +173,19 @@ When the period is exceeded the authentication flow will reset.
 
 ![Magic Link continuation expired](docs/assets/magic-link-continuation-expiration.png)
 
+### Customization
+
+`MagicLinkContinuationAuthenticator` is `final` and does **not** participate in the `MagicLinkCustomizationSpi`. Its cross-device polling flow is self-contained: email sending and user validation are fixed to the built-in behaviour. To change that behaviour, implement a new `Authenticator` (extending `UsernamePasswordForm`) and register it with its own `AuthenticatorFactory` — not by subclassing any continuation class.
+
 ### Keycloakify Theme Templates
 
-If you are using Keycloakify and need the templates, you can find them in our Keycloakify Starter [fork](https://github.com/p2-inc/keycloakify-starter/tree/p2/magic-link-extension-templates) (go into the [pages](https://github.com/p2-inc/keycloakify-starter/tree/p2/magic-link-extension-templates/src/login/pages) folder). 
+If you are using Keycloakify and need the templates, you can find them in our Keycloakify Starter [fork](https://github.com/p2-inc/keycloakify-starter/tree/p2/magic-link-extension-templates) (go into the [pages](https://github.com/p2-inc/keycloakify-starter/tree/p2/magic-link-extension-templates/src/login/pages) folder).
 
 ### Resource
 
 A Resource you can call with `manage-users` role, which allows you to specify the email, clientId, redirectUri, tokenExpiry and optionally if the email is sent, or the link is just returned to the caller.
 
-Resources created with this API method return a URL that uses an Action Token. This will log a user in directly and skip any Authentication Flows defined. 
+Resources created with this API method return a URL that uses an Action Token. This will log a user in directly and skip any Authentication Flows defined.
 
 Parameters:
 | Name | Required | Default | Description |
@@ -94,10 +227,248 @@ Sample response:
 }
 ```
 
+---
+
+## Login Token
+
+Login Token is a drop-in parallel implementation that can be deployed alongside the existing Magic Link without any breaking changes or flow migration.
+
+### Why Login Token?
+
+The original Magic Link authenticates the user *directly* via the action-token handler, bypassing the standard Keycloak browser flow entirely. This means:
+
+- `acr_values` / step-up authentication cannot be evaluated natively.
+- Subsequent authenticators (e.g. TOTP for LOA=2) cannot run in the same browser session.
+
+Login Token solves this by returning a **login token** instead of an action-token URL. The credential is stored server-side in Infinispan; only a short UUID reference (`lt:{uuid}`) is returned in `login_hint`. The standard browser flow runs in full — `acr_values`, `Condition – Level of Authentication`, and all step-up logic work natively.
+
+### How it works
+
+```
+POST /realms/{realm}/login-token
+  → credential data (userId, clientId, expiry, optional LOA/rememberMe)
+    stored in Infinispan under key "lt:data:{uuid}" with the requested TTL
+  → returns: { "login_hint": "lt:{uuid}" }
+
+Caller constructs the OIDC authorization URL and opens it in the browser:
+  https://keycloak.host/realms/{realm}/protocol/openid-connect/auth
+    ?client_id=myapp
+    &response_type=code
+    &login_hint=lt:{uuid}       ← returned login_hint passed verbatim
+    &prompt=login               ← required (see note below)
+    &redirect_uri=...           ← caller's redirect URI
+    &code_challenge=...         ← caller's PKCE challenge
+    &state=...                  ← caller's state
+    [+ any other OIDC params]
+
+  → standard OIDC browser flow starts
+  → Login Token Verifier (login-token-verifier) resolves the credential:
+      1. Strips "lt:" prefix from login_hint to get the UUID
+      2. Looks up credential data in Infinispan by "lt:data:{uuid}"
+      3. Checks expiry (TTL-enforced by Infinispan + explicit timestamp check)
+      4. Verifies stored clientId matches the current OIDC client
+      5. Enforces single-use via putIfAbsent("lt:used:{uuid}", ttl)
+         (unless reusable=true)
+      6. Sets user, optional LOA, optional remember-me
+      7. context.success() → flow continues normally
+  → Any subsequent step-up authenticators run in the same browser session
+```
+
+> **`prompt=login` is required.** Without it, Keycloak may find an existing session cookie before
+> the Login Token Verifier runs and pre-populate the auth session with the cookie user.
+> This causes an `already authenticated as different user` error when the Verifier later tries
+> to authenticate the login token target user.
+
+> **Why UUID instead of a signed JWT?**  Keycloak silently ignores OIDC parameters longer than
+> 255 characters. A typical HS512/RS256 JWT is 500–700 characters and would be dropped, causing
+> authentication to fail silently. The UUID reference (`lt:{uuid}`) is ~42 characters.
+> Security is equivalent to v1 action tokens: 128-bit random UUID entropy + Infinispan TTL +
+> atomic single-use tracking.
+
+### REST API — `/login-token`
+
+Requires `manage-users` role (same as `/magic-link`).
+
+**Parameters:**
+
+| Name | Required | Default | Description |
+| ----- | ----- | ----- | ----- |
+| `user_id` | Y* | | Keycloak user ID. Takes precedence over `email` and `username` when provided. `force_create` is ignored. |
+| `email` | Y* | | Email address of the user. Mutually exclusive with `username`. |
+| `username` | Y* | | Username of the user. When provided, `force_create` is ignored. |
+| `client_id` | Y | | Client ID validated when the login token is redeemed. The verifier rejects redemption attempts from any other client. |
+| `expiration_seconds` | N | 300 (5 min) | Token validity in seconds. |
+| `loa` | N | | Force the session to this LOA level, overriding the flow's Condition configuration. |
+| `remember_me` | N | false | Set the remember-me flag on the session. |
+| `force_create` | N | false | Create the user if they do not exist (email only). |
+| `reusable` | N | true | Allow the token to be used more than once within its validity window. |
+| `set_email_verified` | N | false | When `true`, marks the user's email as verified after the token is successfully validated. |
+| `confirm_user_switch` | N | false | Controls behaviour when a different user is already logged in on the device. When `false` (default), the existing session is silently logged out and the login token is processed automatically. When `true`, a confirmation screen is shown asking the user to approve the logout before continuing. |
+
+*One of `user_id`, `email`, or `username` is required. `user_id` takes precedence if multiple are provided.
+
+> **Important: place the Login Token Verifier before the Cookie authenticator in your flow.**
+> Keycloak evaluates ALTERNATIVE executions in order and stops at the first success. If Cookie
+> runs before the Verifier and an active session exists, Keycloak silently returns that session's
+> token — even if it belongs to a different user than the one in the login token. Placing the
+> Verifier first ensures it always gets to evaluate `login_hint` before Cookie can short-circuit
+> the flow:
+>
+> ```
+> Browser Flow
+> ├── Login Token Verifier  [ALTERNATIVE]  ← must be first
+> ├── Cookie                [ALTERNATIVE]
+> ├── Kerberos              [ALTERNATIVE]
+> └── Username/Password     [ALTERNATIVE]
+> ```
+
+**Sample request:**
+
+```
+curl --request POST https://keycloak.host/realms/test/login-token \
+ --header "Accept: application/json" \
+ --header "Content-Type: application/json" \
+ --header "Authorization: Bearer <access_token>" \
+ --data '{
+   "email": "foo@example.com",
+   "client_id": "myapp",
+   "expiration_seconds": 300
+ }'
+```
+
+**Sample response:**
+
+```json
+{
+  "login_hint": "lt:5713e2a7-53a6-4fbc-8ff5-53d5d8862418"
+}
+```
+
+The caller then constructs the OIDC authorization URL using the returned `login_hint` and opens it in the browser (or sends it to the user by email/SMS):
+
+```
+https://keycloak.host/realms/test/protocol/openid-connect/auth
+  ?client_id=myapp
+  &response_type=code
+  &login_hint=lt:5713e2a7-53a6-4fbc-8ff5-53d5d8862418
+  &prompt=login
+  &redirect_uri=https://myapp.example.com/callback
+  &scope=openid profile
+  &state=abc123
+  &nonce=xyz789
+  &code_challenge=<S256-challenge>
+  &code_challenge_method=S256
+```
+
+The caller is fully responsible for PKCE (`code_challenge`, `code_challenge_method`, `code_verifier`), `state`, `nonce`, `redirect_uri`, and `scope`. This design ensures that the entity generating the PKCE `code_verifier` is always the same entity that handles the authorization code callback — regardless of whether the link is opened on the same device or clicked on a different device (e.g. from an email).
+
+### User-switch behaviour
+
+When a login token is opened for User B while User A is already logged in on the same device, the verifier detects the session conflict and handles it based on the `confirm_user_switch` parameter:
+
+**Default (`confirm_user_switch: false`) — automatic logout:**
+The existing session cookies are silently expired and the browser is redirected to a fresh OIDC authorization request. The login token is still valid (single-use mark is not set until authentication completes), so the fresh flow picks it up and logs User B in transparently — no screen is shown.
+
+**`confirm_user_switch: true` — confirmation screen:**
+A confirmation page is shown informing the user that they are currently signed in on this device and asking whether they want to continue. Two options are presented:
+- **Sign out and continue** — performs the same automatic logout and redirect as the default behaviour.
+- **Cancel** — aborts the flow and redirects back to the client with `error=access_denied`.
+
+### Login Token (form-based)
+
+In addition to the `login_hint`-based flow, there is a form-based authenticator that presents a UI input field so users can manually enter a login token.
+
+**Provider ID:** `login-token-form` · **UI display name:** `Login Token`
+
+The form accepts the token with or without the `lt:` prefix — the prefix is added automatically if absent. On an invalid or expired token the form is re-displayed with an error message; the flow never falls through silently to the next alternative.
+
+**Placement:** Add as `ALTERNATIVE` or `REQUIRED` in the browser flow. Unlike `Login Token (with login_hint)`, this authenticator always shows a UI — do not place it before the Cookie authenticator unless you want every unauthenticated visit to show the token form.
+
+**User-switch behaviour:** When a user-switch is needed (an active session exists for a different user), the confirmation dialog is always shown regardless of the token's `confirm_user_switch` flag. Auto-logout without confirmation is inappropriate in an interactive form context. After confirmation, session cookies are expired and the browser is redirected to a fresh OIDC authorization URL with `login_hint=lt:{tokenId}` so that `Login Token (with login_hint)` can complete the authentication automatically if it is present in the same flow.
+
+**Example flow using both authenticators:**
+
+```
+Browser Flow
+├── Login Token (with login_hint)  [ALTERNATIVE]  ← automated redemption via login_hint
+├── Cookie                         [ALTERNATIVE]
+└── Forms sub-flow                 [ALTERNATIVE]
+    └── Login Token                [ALTERNATIVE]  ← manual entry form as fallback
+```
+
+---
+
 ## Email OTP
 
 There is a simple authenticator to email a 6-digit OTP to the users email address. This implementation sends the email using a theme-resources template, which you can override. It is recommended to use this in an Authentication flow following the _Username form_. An example flow looks like this:
 ![Install Email OTP Authenticator in Browser Flow](docs/assets/email-otp-authenticator.png)
+
+## Cloudflare Turnstile CAPTCHA
+
+There are three [Cloudflare Turnstile](https://www.cloudflare.com/application-services/products/turnstile/) integrations available, each suited for a different flow type. All three share the same configuration — you will need a Cloudflare account with a Turnstile widget set up to obtain a **Site Key**, **Secret**, and **Action** value.
+
+Before using any of them:
+
+- Go to **Realm Settings → Security Defenses → Content-Security-Policy** and add `https://challenges.cloudflare.com` to the `frame-src` directive (space-separated list) so Keycloak can load the Turnstile widget.
+- Set the login theme to `cloudflare-turnstile`. This can be applied to the entire realm under **Realm Settings → Themes → Login theme**, or to a specific client under the client's **Settings → Login settings → Login theme**.
+
+![Setting the cloudflare-turnstile login theme](docs/assets/cloudflare-turnstile-theme.png)
+
+All three share the same configuration dialog — enter your **Turnstile Site Key**, **Turnstile Secret**, and **Action** from your Cloudflare dashboard:
+
+![Cloudflare Turnstile authenticator configuration](docs/assets/cloudflare-turnstile-config.png)
+
+### Cloudflare Turnstile Validation (standalone)
+
+**Display name:** `Cloudflare Turnstile validation`
+
+A standalone authenticator step that presents a dedicated Turnstile challenge page to the user. This is the most flexible option — it can be placed before any step in a login flow that needs bot protection (e.g., before Magic Link or Email OTP). It does not require the user to be identified beforehand.
+
+**When to use:** Add it as a step in your browser flow immediately before any authenticator you want to protect, such as the Magic Link authenticator.
+
+![Cloudflare Turnstile standalone step in a browser flow](docs/assets/cloudflare-turnstile-standalone.png)
+
+### Cloudflare Turnstile Username Password Form
+
+**Display name:** `Cloudflare Turnstile Username Password Form`
+
+A drop-in replacement for Keycloak's standard **Username Password Form** step. It embeds the Turnstile widget directly into the login page alongside the username and password fields, so users complete the CAPTCHA as part of signing in rather than on a separate page.
+
+If the Turnstile check fails but the user provides valid credentials, the authenticator can optionally flag the account for email verification before the session is granted. This is controlled by the **Verify email on CAPTCHA failure** configuration option, which is **disabled by default**. When enabled, it acts as a rudimentary MFA fallback for environments that do not support full 2FA flows — legitimate users are not hard-blocked but must verify their email, raising friction for bots.
+
+> **Note:** If the authenticator configuration is missing or incomplete (no Site Key, Secret, or Action set), it falls back to behaving exactly like the standard Keycloak Username Password Form — no CAPTCHA is shown and login proceeds normally.
+
+**When to use:** Replace the standard `Username Password Form` execution in a browser flow when you want Turnstile protection on the login page itself without adding a separate step.
+
+![Cloudflare Turnstile Username Password Form in a browser flow](docs/assets/cloudflare-turnstile-username-password.png)
+
+#### Use case: CAPTCHA-gated 2FA
+
+A powerful pattern enabled by combining this authenticator with the **Condition - Turnstile Failed** conditional authenticator is CAPTCHA-controlled 2FA enforcement. The idea is to place a conditional subflow after the login step that contains your 2FA executions (OTP, WebAuthn, etc.) and use the two conditions below to decide when it runs.
+
+**2FA triggered by Turnstile failure**
+
+Add `Condition - Turnstile Failed` as **Required** inside the conditional subflow. The 2FA challenge is only presented to users for whom the CAPTCHA failed — suspected bots or automated submissions — while normal users who pass the widget proceed without any extra step.
+
+![2FA subflow gated by Turnstile failure](docs/assets/cloudflare-turnstile-failed-conditional-flow.png)
+
+**2FA based on user settings**
+
+Set `Condition - Turnstile Failed` to **Disabled** and rely solely on `Condition - user configured` and `Condition - credential`. The 2FA subflow now runs for any user who has a second factor enrolled, regardless of the CAPTCHA result — the standard Keycloak 2FA behaviour.
+
+![2FA subflow based on user settings](docs/assets/cloudflare-turnstile-conditioned-by-user-settings.png)
+
+By toggling the `Condition - Turnstile Failed` step between **Required** and **Disabled** you can switch the flow between bot-targeted 2FA and universal 2FA without restructuring the flow.
+
+### Cloudflare Turnstile Validation (registration form action)
+
+**Display name:** `Cloudflare Turnstile validation` (under form actions)
+
+A form action designed specifically for the **Registration** flow. It adds the Turnstile widget to the registration form and validates the challenge when the user submits. The check is automatically skipped if the user is already identified (e.g., in an invite flow).
+
+**When to use:** Add it as a form action inside the built-in Registration flow to prevent bots from bulk-creating accounts through self-registration.
+
+![Cloudflare Turnstile form action in a registration flow](docs/assets/cloudflare-turnstile-registration.png)
 
 ## Installation
 
@@ -122,6 +493,22 @@ If you are depending on the library in your own Maven-built project, or using a 
       <version>VERSION</version>
     </dependency>
 ```
+
+## Building and testing
+
+Checkout this project and run `mvn clean install`, which will build the source, run all unit/integration tests, and produce a jar in the `target/` directory. The build enforces Google Java formatting standards via [Spotless](https://github.com/diffplug/spotless); run `mvn spotless:apply` to auto-format your code before committing.
+
+### Code formatting
+
+Spotless replaces the previously used Spotify `fmt-maven-plugin`. Use `mvn spotless:check` to verify formatting and `mvn spotless:apply` to fix it.
+
+To enforce formatting automatically before every push, install the provided git pre-push hook:
+
+```
+mvn spotless:install-git-pre-push-hook
+```
+
+When you push, the hook runs `spotless:check`. If violations are found, it automatically runs `spotless:apply`, aborts the push, and lets you review and commit the formatted files before retrying.
 
 ## Implementation Notes
 

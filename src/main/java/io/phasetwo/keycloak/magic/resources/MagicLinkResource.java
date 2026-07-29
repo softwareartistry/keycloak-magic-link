@@ -3,7 +3,7 @@ package io.phasetwo.keycloak.magic.resources;
 import static io.phasetwo.keycloak.magic.MagicLink.MAGIC_LINK;
 
 import io.phasetwo.keycloak.magic.MagicLink;
-import io.phasetwo.keycloak.magic.auth.token.MagicLinkActionToken;
+import io.phasetwo.keycloak.magic.auth.magic.MagicLinkActionToken;
 import io.phasetwo.keycloak.magic.representation.MagicLinkRequest;
 import io.phasetwo.keycloak.magic.representation.MagicLinkResponse;
 import jakarta.ws.rs.*;
@@ -20,7 +20,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.UserModel;
 
 @JBossLog
-public class MagicLinkResource extends AbstractAdminResource {
+public final class MagicLinkResource extends AbstractAdminResource {
 
   public MagicLinkResource(KeycloakSession session) {
     super(session);
@@ -49,7 +49,6 @@ public class MagicLinkResource extends AbstractAdminResource {
     if (rep.getUsername() != null) {
       emailOrUsername = rep.getUsername();
       forceCreate = false;
-      sendEmail = false;
     }
 
     UserModel user =
@@ -65,6 +64,10 @@ public class MagicLinkResource extends AbstractAdminResource {
       throw new NotFoundException(
           String.format(
               "User with email/username %s not found, and forceCreate is off.", emailOrUsername));
+
+    if (user.getEmail() == null || user.getEmail().isBlank()) {
+      sendEmail = false;
+    }
 
     MagicLinkActionToken token =
         MagicLink.createActionToken(

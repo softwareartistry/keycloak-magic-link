@@ -1,0 +1,109 @@
+{
+  "realm": "turnstile-realm",
+  "enabled": true,
+  "loginTheme": "cloudflare-turnstile",
+  "clients": [
+    {
+      "clientId": "test-client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost/*"],
+      "webOrigins": ["+"]
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "turnstile-browser-flow",
+      "description": "Browser flow with Cloudflare Turnstile Username Password authenticator",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 25,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "autheticatorFlow": true,
+          "flowAlias": "turnstile forms",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "turnstile forms",
+      "description": "",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "turnstile-config",
+          "authenticator": "ext-auth-cloudflare-turnstile",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 11,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "turnstile-config",
+      "config": {
+        "cloudflare_site_key": "1x00000000000000000000AA",
+        "cloudflare_secret": "1x0000000000000000000000000000000AA",
+        "cloudflare_action": "login",
+        "cloudflare_siteverify_url": "http://wiremock:8080/turnstile/v0/siteverify"
+      }
+    }
+  ],
+  "browserFlow": "turnstile-browser-flow",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'self'; object-src 'none';"
+  },
+  "users": [
+    {
+      "username": "test@phasetwo.io",
+      "email": "test@phasetwo.io",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "R",
+      "lastName": "T",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test123",
+          "temporary": false
+        }
+      ]
+    }
+    ]
+}

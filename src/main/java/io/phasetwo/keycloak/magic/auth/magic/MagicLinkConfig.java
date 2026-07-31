@@ -62,7 +62,7 @@ public final class MagicLinkConfig {
     TOKEN_LIFESPAN_PROPERTY.setName(ACTION_TOKEN_LIFE_SPAN);
     TOKEN_LIFESPAN_PROPERTY.setLabel("Token lifespan");
     TOKEN_LIFESPAN_PROPERTY.setHelpText(
-        "Amount of time the magic link is valid, in seconds. Defaults to 86400 s (1 day) if not set.");
+        "Amount of time the magic link is valid, in seconds. Defaults to 600 s (10 minutes) if not set.");
   }
 
   /** Ordered base config properties shared by all standard magic link authenticator variants. */

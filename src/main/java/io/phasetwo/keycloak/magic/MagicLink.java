@@ -13,10 +13,13 @@ import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import lombok.extern.jbosslog.JBossLog;
@@ -47,6 +50,7 @@ import org.keycloak.services.Urls;
 import org.keycloak.services.resources.LoginActionsService;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.theme.Theme;
 
 /** common utilities for Magic Link authentication, used by the authenticator and resource */
 @JBossLog
@@ -56,6 +60,9 @@ public final class MagicLink {
 
   public static String MAGIC_LINK = "magic";
   public static String EMAIL_OTP = "email-otp";
+
+  /** Default validity for a magic link action token when none is configured: 10 minutes. */
+  public static final int DEFAULT_MAGIC_LINK_VALIDITY_SECONDS = 60 * 10;
 
   public static final String CREATE_NONEXISTENT_USER_CONFIG_PROPERTY =
       "ext-magic-create-nonexistent-user";
@@ -216,7 +223,7 @@ public final class MagicLink {
       Boolean isActionTokenPersistent,
       String responseMode) {
     // build the action token
-    int validityInSecs = validity.orElse(60 * 60 * 24); // 1 day
+    int validityInSecs = validity.orElse(DEFAULT_MAGIC_LINK_VALIDITY_SECONDS);
     int absoluteExpirationInSecs = Time.currentTime() + validityInSecs;
     MagicLinkActionToken token =
         new MagicLinkActionToken(
@@ -297,6 +304,11 @@ public final class MagicLink {
   }
 
   public static boolean sendMagicLinkEmail(KeycloakSession session, UserModel user, String link) {
+    return sendMagicLinkEmail(session, user, link, -1);
+  }
+
+  public static boolean sendMagicLinkEmail(
+      KeycloakSession session, UserModel user, String link, int expirationInMinutes) {
     RealmModel realm = session.getContext().getRealm();
     ClientModel client = session.getContext().getClient();
     try {
@@ -316,8 +328,10 @@ public final class MagicLink {
           .setUser(user)
           .setAttribute("realmName", realmName)
           .setAttribute("clientName", clientName)
-          .setAttribute("clientId", clientId)
-          .send("magicLinkSubject", subjAttr, "magic-link-email.ftl", bodyAttr);
+          .setAttribute("clientId", clientId);
+      addLinkExpirationAttributes(
+          session, user, expirationInMinutes, bodyAttr, emailTemplateProvider);
+      emailTemplateProvider.send("magicLinkSubject", subjAttr, "magic-link-email.ftl", bodyAttr);
       return true;
     } catch (EmailException e) {
       log.error("Failed to send magic link email", e);
@@ -327,6 +341,11 @@ public final class MagicLink {
 
   public static boolean sendMagicLinkContinuationEmail(
       KeycloakSession session, UserModel user, String link) {
+    return sendMagicLinkContinuationEmail(session, user, link, -1);
+  }
+
+  public static boolean sendMagicLinkContinuationEmail(
+      KeycloakSession session, UserModel user, String link, int expirationInMinutes) {
     RealmModel realm = session.getContext().getRealm();
     ClientModel client = session.getContext().getClient();
     try {
@@ -346,17 +365,72 @@ public final class MagicLink {
           .setUser(user)
           .setAttribute("realmName", realmName)
           .setAttribute("clientName", clientName)
-          .setAttribute("clientId", clientId)
-          .send(
-              "magicLinkContinuationSubject",
-              subjAttr,
-              "magic-link-continuation-email.ftl",
-              bodyAttr);
+          .setAttribute("clientId", clientId);
+      addLinkExpirationAttributes(
+          session, user, expirationInMinutes, bodyAttr, emailTemplateProvider);
+      emailTemplateProvider.send(
+          "magicLinkContinuationSubject",
+          subjAttr,
+          "magic-link-continuation-email.ftl",
+          bodyAttr);
       return true;
     } catch (EmailException e) {
       log.error("Failed to send magic link continuation email", e);
     }
     return false;
+  }
+
+  /**
+   * Adds the link-expiry values to the email model when a positive expiration is known. Exposes two
+   * attributes to the template: {@code linkExpiration} (raw minutes) and {@code linkExpirationText}
+   * (a localized human string like "10 minutes" / "1 day"). A non-positive value means "unknown",
+   * in which case nothing is added and existing behavior is preserved.
+   */
+  private static void addLinkExpirationAttributes(
+      KeycloakSession session,
+      UserModel user,
+      int expirationInMinutes,
+      Map<String, Object> bodyAttr,
+      EmailTemplateProvider emailTemplateProvider) {
+    if (expirationInMinutes <= 0) {
+      return;
+    }
+    String linkExpirationText = formatLinkExpiration(session, user, expirationInMinutes);
+    bodyAttr.put("linkExpiration", expirationInMinutes);
+    bodyAttr.put("linkExpirationText", linkExpirationText);
+    emailTemplateProvider
+        .setAttribute("linkExpiration", expirationInMinutes)
+        .setAttribute("linkExpirationText", linkExpirationText);
+  }
+
+  /**
+   * Formats an expiration (minutes) into a localized human string such as "10 minutes" / "1 day".
+   * Reuses Keycloak's own {@code LinkExpirationFormatterMethod} against the realm's email-theme
+   * messages, reached reflectively so we don't need a compile-time FreeMarker dependency (the class
+   * implements a FreeMarker interface). Falls back to a plain string if anything fails, so a
+   * formatting problem can never block the email from being sent.
+   */
+  private static String formatLinkExpiration(
+      KeycloakSession session, UserModel user, int expirationInMinutes) {
+    try {
+      Locale locale = session.getContext().resolveLocale(user);
+      Theme theme = session.theme().getTheme(Theme.Type.EMAIL);
+      Properties messages = theme.getMessages(locale);
+      Class<?> formatterClass =
+          Class.forName("org.keycloak.theme.beans.LinkExpirationFormatterMethod");
+      Object formatter =
+          formatterClass
+              .getConstructor(Properties.class, Locale.class)
+              .newInstance(messages, locale);
+      // format() works in SECONDS (the public exec() multiplies its minutes argument by 60 before
+      // calling it), so convert minutes -> seconds here.
+      Method format = formatterClass.getDeclaredMethod("format", long.class);
+      format.setAccessible(true);
+      return String.valueOf(format.invoke(formatter, expirationInMinutes * 60L));
+    } catch (Exception e) {
+      log.warn("Failed to format link expiration; using fallback", e);
+      return expirationInMinutes + " minutes";
+    }
   }
 
   public static boolean sendOtpEmail(KeycloakSession session, UserModel user, String code) {

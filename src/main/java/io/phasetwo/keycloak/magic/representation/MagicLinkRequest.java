@@ -2,6 +2,7 @@ package io.phasetwo.keycloak.magic.representation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.phasetwo.keycloak.magic.MagicLink;
 import lombok.Data;
 
 @Data
@@ -20,7 +21,7 @@ public class MagicLinkRequest {
   private String redirectUri;
 
   @JsonProperty("expiration_seconds")
-  private int expirationSeconds = 60 * 60 * 24;
+  private int expirationSeconds = MagicLink.DEFAULT_MAGIC_LINK_VALIDITY_SECONDS;
 
   @JsonProperty("force_create")
   private boolean forceCreate = false;

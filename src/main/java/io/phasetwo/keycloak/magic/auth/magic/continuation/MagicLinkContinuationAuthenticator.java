@@ -4,6 +4,7 @@ import static io.phasetwo.keycloak.magic.MagicLink.CREATE_NONEXISTENT_USER_CONFI
 import static io.phasetwo.keycloak.magic.MagicLink.MAGIC_LINK;
 import static io.phasetwo.keycloak.magic.auth.util.Authenticators.is;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.AUTH_SESSION_EXP;
+import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_LAST_POLLED;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_STATE;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.SESSION_CONFIRMED;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.SESSION_EXPIRATION;
@@ -23,6 +24,7 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator;
 import org.keycloak.authentication.authenticators.browser.UsernamePasswordForm;
+import org.keycloak.common.util.Time;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
@@ -30,7 +32,6 @@ import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.AuthenticatorConfigModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.services.managers.AuthenticationManager;
-import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.utils.StringUtil;
 
@@ -42,15 +43,15 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
     log.debug("MagicLinkContinuationAuthenticator.authenticate");
 
     if (sessionExpired(context)) {
-      AuthenticationSessionManager manager = new AuthenticationSessionManager(context.getSession());
-      manager.removeTabIdInAuthenticationSession(
-          context.getRealm(), context.getAuthenticationSession());
+      // The continuation window elapsed. Clear the (server-side) continuation state so the user can
+      // immediately retry in the SAME tab, instead of being stuck re-hitting this expired branch on
+      // every re-entry (previously only a brand-new tab/session could escape it).
+      resetContinuationState(context);
 
       context.getEvent().error(Errors.SESSION_EXPIRED);
       Response challengeResponse =
           challenge(context, Messages.EXPIRED_ACTION_TOKEN_NO_SESSION, FIELD_USERNAME);
-      context.failureChallenge(
-          AuthenticationFlowError.GENERIC_AUTHENTICATION_ERROR, challengeResponse);
+      context.forceChallenge(challengeResponse);
       return;
     }
 
@@ -115,6 +116,21 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
       return expired;
     }
     return false;
+  }
+
+  /**
+   * Clears the magic-link-continuation notes from the authentication session so a stale/expired
+   * attempt does not poison it. Without this, {@link #sessionExpired} returns true on every
+   * subsequent entry and the user is stuck on the expired page until they open a brand-new tab.
+   */
+  private void resetContinuationState(AuthenticationFlowContext context) {
+    var authSession = context.getAuthenticationSession();
+    authSession.removeAuthNote(SESSION_EXPIRATION);
+    authSession.removeAuthNote(SESSION_INITIATED);
+    authSession.removeAuthNote(SESSION_CONFIRMED);
+    authSession.removeAuthNote(MLC_STATE);
+    authSession.removeAuthNote(MLC_LAST_POLLED);
+    authSession.removeAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME);
   }
 
   @Override
@@ -202,7 +218,8 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
         MagicLink.createExpandedActionToken(
             user, clientId, validityInSecs, context.getAuthenticationSession());
     String link = MagicLink.linkFromActionToken(context.getSession(), context.getRealm(), token);
-    boolean sent = MagicLink.sendMagicLinkContinuationEmail(context.getSession(), user, link);
+    boolean sent =
+        MagicLink.sendMagicLinkContinuationEmail(context.getSession(), user, link, timeout);
     log.debugf("sent email to %s? %b. Link? %s", user.getEmail(), sent, link);
 
     context
@@ -221,6 +238,11 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
     context.getAuthenticationSession().setAuthNote(MLC_STATE, STATE_PENDING);
     long exp = (System.currentTimeMillis() / 1000L) + (timeout * 60);
     context.getAuthenticationSession().setClientNote(AUTH_SESSION_EXP, String.valueOf(exp));
+    // Seed the heartbeat so a link click in the first seconds (before the first poll) isn't
+    // misread as an abandoned tab; the polling endpoint refreshes it every ~2.5s thereafter.
+    context
+        .getAuthenticationSession()
+        .setAuthNote(MLC_LAST_POLLED, String.valueOf(Time.currentTime()));
 
     // Pass tabId, sessionId and polling URL to template for JavaScript polling
     String tabId = context.getAuthenticationSession().getTabId();

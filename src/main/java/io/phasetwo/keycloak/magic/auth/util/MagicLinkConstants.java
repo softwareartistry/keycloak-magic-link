@@ -14,4 +14,11 @@ public final class MagicLinkConstants {
   public static final String STATE_CONFIRMED = "confirmed";
   public static final String STATE_EXPIRED = "expired";
   public static final String AUTH_SESSION_EXP = "auth_session_exp";
+
+  // Heartbeat: the polling (original) tab stamps this note on each poll so the link handler can
+  // tell whether that tab is still alive before confirming the continuation login.
+  public static final String MLC_LAST_POLLED = "MLC_LAST_POLLED";
+  // Max age (seconds) of the last poll before the original tab is treated as abandoned. Polling
+  // runs every ~2.5s, so 15s tolerates network jitter / retry backoff without false positives.
+  public static final int MLC_LIVENESS_THRESHOLD_SECONDS = 15;
 }

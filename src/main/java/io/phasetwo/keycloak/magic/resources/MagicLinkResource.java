@@ -86,7 +86,7 @@ public final class MagicLinkResource extends AbstractAdminResource {
     String link = MagicLink.linkFromActionToken(session, realm, token);
     boolean sent = false;
     if (sendEmail) {
-      sent = MagicLink.sendMagicLinkEmail(session, user, link);
+      sent = MagicLink.sendMagicLinkEmail(session, user, link, rep.getExpirationSeconds() / 60);
       log.debugf("sent email to %s? %b. Link? %s", rep.getEmail(), sent, link);
     }
 

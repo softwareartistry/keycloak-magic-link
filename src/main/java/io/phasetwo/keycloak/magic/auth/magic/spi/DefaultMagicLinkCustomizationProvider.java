@@ -21,7 +21,9 @@ public final class DefaultMagicLinkCustomizationProvider implements MagicLinkCus
   @Override
   public boolean sendMagicLinkEmail(
       KeycloakSession session, UserModel user, String link, MagicLinkConfig config) {
-    return MagicLink.sendMagicLinkEmail(session, user, link);
+    int expirationInMinutes =
+        config.getTokenLifespan().orElse(MagicLink.DEFAULT_MAGIC_LINK_VALIDITY_SECONDS) / 60;
+    return MagicLink.sendMagicLinkEmail(session, user, link, expirationInMinutes);
   }
 
   @Override

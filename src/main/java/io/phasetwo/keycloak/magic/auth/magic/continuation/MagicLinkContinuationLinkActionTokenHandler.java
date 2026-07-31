@@ -1,5 +1,7 @@
 package io.phasetwo.keycloak.magic.auth.magic.continuation;
 
+import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_LAST_POLLED;
+import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_LIVENESS_THRESHOLD_SECONDS;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.MLC_STATE;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.SESSION_CONFIRMED;
 import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.STATE_CONFIRMED;
@@ -12,6 +14,7 @@ import java.net.URI;
 import lombok.extern.jbosslog.JBossLog;
 import org.keycloak.authentication.actiontoken.AbstractActionTokenHandler;
 import org.keycloak.authentication.actiontoken.ActionTokenContext;
+import org.keycloak.common.util.Time;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.forms.login.LoginFormsProvider;
@@ -59,13 +62,24 @@ public class MagicLinkContinuationLinkActionTokenHandler
       AuthenticationSessionModel authenticationFlowSession =
           rootAuthenticationSession.getAuthenticationSession(client, token.getTabId());
       if (authenticationFlowSession != null) {
+        if (!originalTabActive(authenticationFlowSession)) {
+          log.debugf(
+              "[MLC] Original login tab appears abandoned (last poll stale/absent) for tabId: %s;"
+                  + " showing 'no longer valid' instead of confirming.",
+              token.getTabId());
+          tokenContext.getEvent().error("magic_link_continuation_tab_abandoned");
+          return loginFormsProvider
+              .setActionUri(URI.create("#"))
+              .createForm("email-confirmation-error.ftl");
+        }
         log.debugf(
             "[MLC] Magic link clicked! Setting SESSION_CONFIRMED and MLC_STATE=confirmed for tabId: %s",
             token.getTabId());
         authenticationFlowSession.setAuthNote(SESSION_CONFIRMED, "true");
         // Set MLC_STATE to confirmed for polling endpoint
         authenticationFlowSession.setAuthNote(MLC_STATE, STATE_CONFIRMED);
-        log.debugf("[MLC] State set. SESSION_CONFIRMED=%s, MLC_STATE=%s",
+        log.debugf(
+            "[MLC] State set. SESSION_CONFIRMED=%s, MLC_STATE=%s",
             authenticationFlowSession.getAuthNote(SESSION_CONFIRMED),
             authenticationFlowSession.getAuthNote(MLC_STATE));
         Cookie cookie =
@@ -125,5 +139,24 @@ public class MagicLinkContinuationLinkActionTokenHandler
     AuthenticationSessionModel authSession =
         rootAuthenticationSession.createAuthenticationSession(client);
     return authSession;
+  }
+
+  /**
+   * Returns true if the original (polling) tab stamped a heartbeat within the liveness window.
+   * Closing the tab does not remove the server-side auth session, so we cannot detect it directly;
+   * instead we rely on the fact that polling stops when the tab is gone, leaving the heartbeat
+   * stale. This lets us show "no longer valid" rather than confirming a login nothing will finish.
+   */
+  private static boolean originalTabActive(AuthenticationSessionModel authSession) {
+    String lastPolled = authSession.getAuthNote(MLC_LAST_POLLED);
+    if (lastPolled == null) {
+      return false;
+    }
+    try {
+      long ageSeconds = Time.currentTime() - Long.parseLong(lastPolled);
+      return ageSeconds <= MLC_LIVENESS_THRESHOLD_SECONDS;
+    } catch (NumberFormatException e) {
+      return false;
+    }
   }
 }

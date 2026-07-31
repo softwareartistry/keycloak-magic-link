@@ -194,7 +194,7 @@ Parameters:
 | `username` | N | | Username of the User to create the magic link for. Ignores email and forces `force_create`, `update_profile`, `update_password` and `send_email` to `false` if set. |
 | `client_id` | Y | | Client ID the user will be logging in to. |
 | `redirect_uri` | Y | | Redirect URI. Must be valid for the given client. |
-| `expiration_seconds` | N | 86400 (1 day) | Amount of time the magic link is valid. |
+| `expiration_seconds` | N | 600 (10 minutes) | Amount of time the magic link is valid. |
 | `force_create` | N | false | Create a user with this email address as username/email if none exists. |
 | `update_profile` | N | false | Add an UPDATE_PROFILE required action if the user was created. |
 | `update_password` | N | false | Add an UPDATE_PASSWORD required action if the user was created. |

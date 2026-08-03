@@ -6,8 +6,8 @@ import static org.keycloak.models.utils.KeycloakModelUtils.findUserByNameOrEmail
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
-import io.phasetwo.keycloak.magic.auth.magic.MagicLinkAuthenticatorFactory;
 import io.phasetwo.keycloak.magic.auth.magic.MagicLinkActionToken;
+import io.phasetwo.keycloak.magic.auth.magic.MagicLinkAuthenticatorFactory;
 import io.phasetwo.keycloak.magic.auth.magic.continuation.MagicLinkContinuationActionToken;
 import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
@@ -33,6 +33,7 @@ import org.keycloak.email.EmailTemplateProvider;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.AuthenticationFlowModel;
 import org.keycloak.models.ClientModel;
@@ -167,7 +168,9 @@ public final class MagicLink {
     String responseMode = authSession.getClientNote(OIDCLoginProtocol.RESPONSE_MODE_PARAM);
     log.debugf(
         "Attempting MagicLinkAuthenticator for %s, %s, %s", user.getEmail(), clientId, redirectUri);
-    log.debugf("MagicLinkAuthenticator extra vars %s %s %s %b %s", scope, state, nonce, rememberMe, responseMode);
+    log.debugf(
+        "MagicLinkAuthenticator extra vars %s %s %s %b %s",
+        scope, state, nonce, rememberMe, responseMode);
     return createActionToken(
         user,
         clientId,
@@ -245,18 +248,7 @@ public final class MagicLink {
   public static MagicLinkActionToken createActionToken(
       UserModel user, String clientId, String redirectUri, OptionalInt validity) {
     return createActionToken(
-            user,
-            clientId,
-            redirectUri,
-            validity,
-            null,
-            null,
-            null,
-            null,
-            null,
-            false,
-            true,
-            null);
+        user, clientId, redirectUri, validity, null, null, null, null, null, false, true, null);
   }
 
   public static String linkFromActionToken(
@@ -369,10 +361,7 @@ public final class MagicLink {
       addLinkExpirationAttributes(
           session, user, expirationInMinutes, bodyAttr, emailTemplateProvider);
       emailTemplateProvider.send(
-          "magicLinkContinuationSubject",
-          subjAttr,
-          "magic-link-continuation-email.ftl",
-          bodyAttr);
+          "magicLinkContinuationSubject", subjAttr, "magic-link-continuation-email.ftl", bodyAttr);
       return true;
     } catch (EmailException e) {
       log.error("Failed to send magic link continuation email", e);
@@ -404,13 +393,30 @@ public final class MagicLink {
   }
 
   /**
+   * Sets the link-expiry values on a login page form, mirroring what {@link
+   * #addLinkExpirationAttributes} does for emails so page, email and token all agree. Exposes {@code
+   * linkExpiration} (raw minutes) and {@code linkExpirationText} (a localized human string like "10
+   * minutes" / "1 day"). A non-positive value adds nothing, so the template simply falls back to its
+   * own {@code !"..."} default and never throws. Returns the same form for fluent chaining.
+   */
+  public static LoginFormsProvider addLinkExpirationFormAttributes(
+      LoginFormsProvider form, KeycloakSession session, UserModel user, int expirationInMinutes) {
+    if (expirationInMinutes <= 0) {
+      return form;
+    }
+    return form.setAttribute("linkExpiration", expirationInMinutes)
+        .setAttribute(
+            "linkExpirationText", formatLinkExpiration(session, user, expirationInMinutes));
+  }
+
+  /**
    * Formats an expiration (minutes) into a localized human string such as "10 minutes" / "1 day".
    * Reuses Keycloak's own {@code LinkExpirationFormatterMethod} against the realm's email-theme
    * messages, reached reflectively so we don't need a compile-time FreeMarker dependency (the class
    * implements a FreeMarker interface). Falls back to a plain string if anything fails, so a
    * formatting problem can never block the email from being sent.
    */
-  private static String formatLinkExpiration(
+  public static String formatLinkExpiration(
       KeycloakSession session, UserModel user, int expirationInMinutes) {
     try {
       Locale locale = session.getContext().resolveLocale(user);

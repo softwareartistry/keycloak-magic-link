@@ -40,45 +40,51 @@ public final class MagicLinkConfig {
     UPDATE_PROFILE_PROPERTY.setType(ProviderConfigProperty.BOOLEAN_TYPE);
     UPDATE_PROFILE_PROPERTY.setName(UPDATE_PROFILE_ACTION_CONFIG_PROPERTY);
     UPDATE_PROFILE_PROPERTY.setLabel("Update profile on create");
-    UPDATE_PROFILE_PROPERTY.setHelpText("Add an UPDATE_PROFILE required action if the user was created.");
+    UPDATE_PROFILE_PROPERTY.setHelpText(
+        "Add an UPDATE_PROFILE required action if the user was created.");
     UPDATE_PROFILE_PROPERTY.setDefaultValue(false);
 
     UPDATE_PASSWORD_PROPERTY = new ProviderConfigProperty();
     UPDATE_PASSWORD_PROPERTY.setType(ProviderConfigProperty.BOOLEAN_TYPE);
     UPDATE_PASSWORD_PROPERTY.setName(UPDATE_PASSWORD_ACTION_CONFIG_PROPERTY);
     UPDATE_PASSWORD_PROPERTY.setLabel("Update password on create");
-    UPDATE_PASSWORD_PROPERTY.setHelpText("Add an UPDATE_PASSWORD required action if the user was created.");
+    UPDATE_PASSWORD_PROPERTY.setHelpText(
+        "Add an UPDATE_PASSWORD required action if the user was created.");
     UPDATE_PASSWORD_PROPERTY.setDefaultValue(false);
 
     TOKEN_PERSISTENT_PROPERTY = new ProviderConfigProperty();
     TOKEN_PERSISTENT_PROPERTY.setType(ProviderConfigProperty.BOOLEAN_TYPE);
     TOKEN_PERSISTENT_PROPERTY.setName(ACTION_TOKEN_PERSISTENT_CONFIG_PROPERTY);
     TOKEN_PERSISTENT_PROPERTY.setLabel("Allow magic link to be reusable");
-    TOKEN_PERSISTENT_PROPERTY.setHelpText("Toggle whether magic link should be persistent until expired.");
+    TOKEN_PERSISTENT_PROPERTY.setHelpText(
+        "Toggle whether magic link should be persistent until expired.");
     TOKEN_PERSISTENT_PROPERTY.setDefaultValue(true);
 
     TOKEN_LIFESPAN_PROPERTY = new ProviderConfigProperty();
     TOKEN_LIFESPAN_PROPERTY.setType(ProviderConfigProperty.STRING_TYPE);
     TOKEN_LIFESPAN_PROPERTY.setName(ACTION_TOKEN_LIFE_SPAN);
-    TOKEN_LIFESPAN_PROPERTY.setLabel("Token lifespan");
+    TOKEN_LIFESPAN_PROPERTY.setLabel("Token lifespan (seconds)");
     TOKEN_LIFESPAN_PROPERTY.setHelpText(
         "Amount of time the magic link is valid, in seconds. Defaults to 600 s (10 minutes) if not set.");
+    TOKEN_LIFESPAN_PROPERTY.setDefaultValue("600");
   }
 
   /** Ordered base config properties shared by all standard magic link authenticator variants. */
-  static final List<ProviderConfigProperty> CONFIG_PROPERTIES = List.of(
-      FORCE_CREATE_PROPERTY,
-      UPDATE_PROFILE_PROPERTY,
-      UPDATE_PASSWORD_PROPERTY,
-      TOKEN_PERSISTENT_PROPERTY,
-      TOKEN_LIFESPAN_PROPERTY);
+  static final List<ProviderConfigProperty> CONFIG_PROPERTIES =
+      List.of(
+          FORCE_CREATE_PROPERTY,
+          UPDATE_PROFILE_PROPERTY,
+          UPDATE_PASSWORD_PROPERTY,
+          TOKEN_PERSISTENT_PROPERTY,
+          TOKEN_LIFESPAN_PROPERTY);
 
   private final Map<String, String> config;
 
   public MagicLinkConfig(AuthenticatorConfigModel configModel) {
-    this.config = (configModel != null && configModel.getConfig() != null)
-        ? configModel.getConfig()
-        : Map.of();
+    this.config =
+        (configModel != null && configModel.getConfig() != null)
+            ? configModel.getConfig()
+            : Map.of();
   }
 
   /** Whether to create a new realm user when the submitted email has no match. */

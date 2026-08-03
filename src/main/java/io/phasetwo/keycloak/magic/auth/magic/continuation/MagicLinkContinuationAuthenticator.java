@@ -200,7 +200,10 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
           .getAuthenticationSession()
           .setAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME, email);
       log.debugf("user attempted to login with username/email: %s", email);
-      context.forceChallenge(context.form().createForm("view-email.ftl"));
+      context.forceChallenge(
+          MagicLink.addLinkExpirationFormAttributes(
+                  context.form(), context.getSession(), user, getTimeout(context, 10))
+              .createForm("view-email.ftl"));
       return;
     }
 

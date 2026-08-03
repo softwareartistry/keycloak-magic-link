@@ -72,6 +72,8 @@ public final class MagicLinkAuthenticator extends UsernamePasswordForm {
     }
 
     MagicLinkConfig config = new MagicLinkConfig(context.getAuthenticatorConfig());
+    int expirationInMinutes =
+        config.getTokenLifespan().orElse(MagicLink.DEFAULT_MAGIC_LINK_VALIDITY_SECONDS) / 60;
     String clientId = context.getSession().getContext().getClient().getClientId();
     EventBuilder event = context.newEvent();
 
@@ -97,7 +99,10 @@ public final class MagicLinkAuthenticator extends UsernamePasswordForm {
           .getAuthenticationSession()
           .setAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME, email);
       log.debugf("user attempted to login with username/email: %s", email);
-      context.forceChallenge(context.form().createForm("view-email.ftl"));
+      context.forceChallenge(
+          MagicLink.addLinkExpirationFormAttributes(
+                  context.form(), context.getSession(), user, expirationInMinutes)
+              .createForm("view-email.ftl"));
       return;
     }
 
@@ -129,7 +134,10 @@ public final class MagicLinkAuthenticator extends UsernamePasswordForm {
     context
         .getAuthenticationSession()
         .setAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME, email);
-    context.challenge(context.form().createForm("view-email.ftl"));
+    context.challenge(
+        MagicLink.addLinkExpirationFormAttributes(
+                context.form(), context.getSession(), user, expirationInMinutes)
+            .createForm("view-email.ftl"));
   }
 
   private boolean rememberMe(AuthenticationFlowContext context) {

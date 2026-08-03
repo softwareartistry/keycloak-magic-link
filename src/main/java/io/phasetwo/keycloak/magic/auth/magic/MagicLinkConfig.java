@@ -60,9 +60,10 @@ public final class MagicLinkConfig {
     TOKEN_LIFESPAN_PROPERTY = new ProviderConfigProperty();
     TOKEN_LIFESPAN_PROPERTY.setType(ProviderConfigProperty.STRING_TYPE);
     TOKEN_LIFESPAN_PROPERTY.setName(ACTION_TOKEN_LIFE_SPAN);
-    TOKEN_LIFESPAN_PROPERTY.setLabel("Token lifespan");
+    TOKEN_LIFESPAN_PROPERTY.setLabel("Token lifespan (seconds)");
     TOKEN_LIFESPAN_PROPERTY.setHelpText(
         "Amount of time the magic link is valid, in seconds. Defaults to 600 s (10 minutes) if not set.");
+    TOKEN_LIFESPAN_PROPERTY.setDefaultValue("600");
   }
 
   /** Ordered base config properties shared by all standard magic link authenticator variants. */

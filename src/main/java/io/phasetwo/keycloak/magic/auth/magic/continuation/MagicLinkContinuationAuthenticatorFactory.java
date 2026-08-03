@@ -81,7 +81,7 @@ public class MagicLinkContinuationAuthenticatorFactory implements AuthenticatorF
     ProviderConfigProperty timeout = new ProviderConfigProperty();
     timeout.setType(ProviderConfigProperty.STRING_TYPE);
     timeout.setName(MagicLinkConstants.TIMEOUT);
-    timeout.setLabel("Expiration time");
+    timeout.setLabel("Expiration time (minutes)");
     timeout.setHelpText(
         "Magic link authenticator expiration time in minutes. Default expiration period 10 minutes.");
     timeout.setDefaultValue("10");

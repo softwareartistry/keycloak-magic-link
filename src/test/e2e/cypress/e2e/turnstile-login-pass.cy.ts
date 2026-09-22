@@ -12,6 +12,7 @@ const realmBase = `${Cypress.config('baseUrl')}realms/turnstile-realm`;
 const loginUrl =
   `${realmBase}/protocol/openid-connect/auth` +
   `?response_type=code&client_id=account&scope=openid` +
+  `&state=cypress-state-pass` +
   `&redirect_uri=${encodeURIComponent(`${realmBase}/account`)}`;
 
 describe('Turnstile Username Password — CAPTCHA passes', () => {

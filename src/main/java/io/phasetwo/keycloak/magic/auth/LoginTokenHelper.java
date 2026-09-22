@@ -211,10 +211,10 @@ class LoginTokenHelper {
         AuthenticationManager.authenticateIdentityCookie(
             context.getSession(), context.getRealm(), false);
     if (cookie != null
-        && cookie.getUser() != null
-        && !cookie.getUser().getId().equals(targetUser.getId())) {
+        && cookie.user() != null
+        && !cookie.user().getId().equals(targetUser.getId())) {
 
-      String currentDisplay = displayName(cookie.getUser());
+      String currentDisplay = displayName(cookie.user());
       String targetDisplay = displayName(targetUser);
       log.debugf("[LT] user switch required: '%s' → '%s'", currentDisplay, targetDisplay);
 

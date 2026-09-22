@@ -1,7 +1,5 @@
 package io.phasetwo.keycloak.magic.resources;
 
-import jakarta.validation.constraints.*;
-import jakarta.ws.rs.*;
 import jakarta.ws.rs.NotAuthorizedException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -103,6 +101,6 @@ public abstract class AbstractAdminResource {
       throw new NotFoundException("Could not find client for authorization");
     }
 
-    return new AdminAuth(realm, authResult.getToken(), authResult.getUser(), client);
+    return new AdminAuth(realm, authResult.token(), authResult.user(), client);
   }
 }

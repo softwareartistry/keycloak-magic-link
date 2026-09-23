@@ -125,8 +125,21 @@ function fetchLoginEmail(toEmail) {
 function extractLoginLink(body) {
 
    const linkRegex = /https?:\/\/[^\s"]+/g
-   const links = body.match(linkRegex)
+   const links = decodeQuotedPrintable(body).match(linkRegex)
 
    expect(links, 'login links').to.not.be.empty
    return links[0]
+}
+
+// Keycloak sends the e-mail quoted-printable encoded. A soft line break (a "="
+// at the end of a line) can fall inside the magic link and truncate it, and "="
+// itself is escaped as "=3D". Un-fold and decode before extracting the URL.
+function decodeQuotedPrintable(body) {
+   if (!/=\r?\n/.test(body)) {
+      return body
+   }
+
+   return body
+       .replace(/=\r?\n/g, '')
+       .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
 }

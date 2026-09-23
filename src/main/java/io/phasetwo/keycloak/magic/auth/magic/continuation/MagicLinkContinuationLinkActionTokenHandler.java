@@ -22,10 +22,12 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.UserModel;
 import org.keycloak.services.managers.AuthenticationManager;
+import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.AuthenticationSessionProvider;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
+import org.keycloak.sessions.StickySessionEncoderProvider;
 
 /** Handles the magic link continuation action token */
 @JBossLog
@@ -89,7 +91,7 @@ public class MagicLinkContinuationLinkActionTokenHandler
                 .getCookies()
                 .get(MagicLinkConstants.AUTH_SESSION_ID);
 
-        boolean sameBrowser = cookie != null && cookie.getValue().equals(token.getSessionId());
+        boolean sameBrowser = isSameBrowser(session, cookie, token.getSessionId());
         MagicLinkContinuationBean magicLinkContinuationBean =
             new MagicLinkContinuationBean(sameBrowser, token.getRedirectUri());
         tokenContext.getEvent().success();
@@ -158,5 +160,26 @@ public class MagicLinkContinuationLinkActionTokenHandler
     } catch (NumberFormatException e) {
       return false;
     }
+  }
+
+  /**
+   * The AUTH_SESSION_ID cookie does not carry the raw authentication session id. Keycloak signs the
+   * id, base64-encodes it, and may append a sticky-session route. Decode the cookie the same way
+   * Keycloak does before comparing it with the id carried by the token.
+   */
+  private static boolean isSameBrowser(
+      KeycloakSession session, Cookie cookie, String tokenSessionId) {
+    if (cookie == null || tokenSessionId == null) {
+      return false;
+    }
+    String encodedSessionId =
+        session
+            .getProvider(StickySessionEncoderProvider.class)
+            .decodeSessionIdAndRoute(cookie.getValue())
+            .sessionId();
+    String cookieSessionId =
+        new AuthenticationSessionManager(session)
+            .decodeBase64AndValidateSignature(encodedSessionId);
+    return tokenSessionId.equals(cookieSessionId);
   }
 }

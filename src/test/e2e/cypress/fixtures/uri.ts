@@ -4,6 +4,7 @@ const testRealmLoginUri = testRealmAuthUri.concat(
     '?response_type=code',
     '&client_id=account',
     '&scope=openid',
+    '&state=', 'cypress-state-test-realm',
     '&redirect_uri=', testRealmUri.concat("/account")
 );
 
@@ -13,6 +14,7 @@ const emailOtpRealmLoginUri = emailOtpRealmAuthUri.concat(
     '?response_type=code',
     '&client_id=account',
     '&scope=openid',
+    '&state=', 'cypress-state-email-otp',
     '&redirect_uri=', emailOtpRealmUri.concat("/account")
 );
 

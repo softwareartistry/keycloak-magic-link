@@ -16,9 +16,10 @@ public final class ActivationGateAuthenticatorFactory implements AuthenticatorFa
 
   public static final String PROVIDER_ID = "ext-auth-activation-gate";
 
+  // No ALTERNATIVE: the gate only identifies the user, so as an alternative its success would
+  // complete the flow without any credential. Keycloak's own Username Form is REQUIRED-only too.
   private static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = {
     AuthenticationExecutionModel.Requirement.REQUIRED,
-    AuthenticationExecutionModel.Requirement.ALTERNATIVE,
     AuthenticationExecutionModel.Requirement.DISABLED
   };
 

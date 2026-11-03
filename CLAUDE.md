@@ -63,13 +63,13 @@ This is a **Keycloak SPI extension** — a JAR deployed into a Keycloak server's
 - `MagicLinkContinuationStatusProvider` / `MagicLinkContinuationStatusProviderFactory` (provider ID: `magic-link-continuation`) — Public REST endpoint at `realms/{realm}/magic-link-continuation/{sessionId}/{tabId}/status`. Returns JSON `{ state: pending|confirmed|expired, expires_in: … }` for the polling tab.
 
 **Other authenticators** (`src/main/java/.../auth/`):
-- `EmailOtpAuthenticator` — Standalone 6-digit OTP via email.
+- `EmailOtpAuthenticator` — Standalone 6-digit OTP via email. Reports credential type `otp`, so failed codes count toward brute-force lockout.
 - `LoginTokenVerifier` / `LoginTokenVerifierFactory` (provider ID: `login-token-verifier`, display name: **"Login Token (with login_hint)"**) — Reads `login_hint=lt:{uuid}` from the OIDC auth request and verifies the token. Passes through silently (`context.attempted()`) when `login_hint` is absent or has a different prefix.
 - `LoginTokenFormAuthenticator` / `LoginTokenFormAuthenticatorFactory` (provider ID: `login-token-form`, display name: **"Login Token"**) — Shows a form for manual token entry. Accepts tokens with or without the `lt:` prefix. Shows a form error on invalid/expired tokens rather than falling through silently.
 - `LoginTokenHelper` — Package-private class with shared constants (`RESUME_PREFIX`, `DATA_KEY_PREFIX`, `USED_KEY_PREFIX`, auth-session note names) and shared static methods (`clearLoginHint`, `displayName`, `resolveLoaLevel`, `completeAuth`) used by both Login Token authenticators.
 
 **REST Resource path** (`src/main/java/.../resources/`):
-- `MagicLinkResource` — `POST realms/{realm}/magic-link`. Requires `manage-users` role. Accepts `MagicLinkRequest`, resolves the `ext-magic-form` execution by `flow_id` to populate `executionId` on the token. Registered via `MagicLinkResourceProviderFactory` (provider ID: `magic-link`).
+- `MagicLinkResource` — `POST realms/{realm}/magic-link`. Requires permission to manage the target user (`manage-users`, or a fine-grained user permission); an unknown user gets the same 403 as an unmanageable one, so callers cannot probe which accounts exist. Accepts `MagicLinkRequest`, resolves the `ext-magic-form` execution by `flow_id` to populate `executionId` on the token. Registered via `MagicLinkResourceProviderFactory` (provider ID: `magic-link`).
 
 ### Key Design Constraints
 

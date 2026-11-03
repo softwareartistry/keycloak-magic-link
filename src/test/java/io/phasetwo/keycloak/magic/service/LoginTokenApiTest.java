@@ -119,6 +119,26 @@ class LoginTokenApiTest extends AbstractMagicLinkTest {
         .statusCode(404);
   }
 
+  // getOrCreate() used to create a user even from a blank email when force_create was on.
+  @Test
+  void createLoginToken_blankEmailWithForceCreate_returnsNotFoundAndCreatesNoUser() {
+    Testcontainers.exposeHostPorts(container.getHttpPort());
+    importRealm("/realms/login-token-api-test-setup.json");
+    int usersBefore = keycloak.realm(TEST_REALM).users().count();
+
+    given()
+        .baseUri(getAuthUrl())
+        .auth()
+        .oauth2(keycloak.tokenManager().getAccessTokenString())
+        .contentType("application/json")
+        .body(Map.of("email", "", "client_id", TEST_CLIENT, "force_create", true))
+        .post(LOGIN_TOKEN_PATH)
+        .then()
+        .statusCode(404);
+
+    assertEquals(usersBefore, keycloak.realm(TEST_REALM).users().count());
+  }
+
   @Test
   void createLoginToken_withUserId_returnsLoginHint() {
     Testcontainers.exposeHostPorts(container.getHttpPort());
@@ -230,6 +250,29 @@ class LoginTokenApiTest extends AbstractMagicLinkTest {
         "second redemption of a single-use login token must be rejected (Location: "
             + secondLocation
             + ")");
+  }
+
+  /**
+   * An unknown {@code lt:} hint is not a credential. The verifier clears it, forwards {@code
+   * loginTokenInvalid}, and calls {@code attempted()} so the username form is shown with an empty
+   * username field.
+   */
+  @Test
+  void invalidLoginHint_showsLoginFormWithMessageAndEmptyUsername() throws Exception {
+    Testcontainers.exposeHostPorts(container.getHttpPort());
+    importRealm("/realms/login-token-invalid-hint-test-setup.json");
+
+    String loginHint = "lt:00000000-0000-0000-0000-000000000000";
+    String link = buildOidcUrl(loginHint, Map.of("redirect_uri", REDIRECT_URI));
+    String html = followUntilPage(link);
+
+    assertTrue(html.contains("name=\"username\""), "username form must be shown");
+    assertTrue(
+        html.contains("Invalid or expired login token. Please try again."),
+        "forwarded loginTokenInvalid message must be shown");
+    assertFalse(
+        html.contains("value=\"" + loginHint + "\""),
+        "username field must not be prefilled with the invalid login hint");
   }
 
   @Test
@@ -407,6 +450,45 @@ class LoginTokenApiTest extends AbstractMagicLinkTest {
     String idToken = tokenResponse.jsonPath().getString("id_token");
     assertNotNull(idToken, "id_token must be present (scope=openid was requested)");
     return decodeJwtPayload(idToken);
+  }
+
+  /**
+   * Follows Keycloak redirects from an authorization URL until the first HTML page. Cookies are
+   * kept so the auth session survives the redirect onto the login form.
+   */
+  private String followUntilPage(String startUrl) throws Exception {
+    var cookieManager = new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL);
+    var httpClient =
+        java.net.http.HttpClient.newBuilder()
+            .cookieHandler(cookieManager)
+            .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+            .build();
+
+    String nextUrl = startUrl;
+    var debug = new StringBuilder("Redirect chain:\n");
+    for (int attempt = 0; attempt < 10; attempt++) {
+      var response =
+          httpClient.send(
+              java.net.http.HttpRequest.newBuilder().uri(URI.create(nextUrl)).GET().build(),
+              java.net.http.HttpResponse.BodyHandlers.ofString());
+      int status = response.statusCode();
+      String location = response.headers().firstValue("Location").orElse(null);
+      debug.append(
+          String.format("  [%d] GET %s → %d  Location: %s%n", attempt, nextUrl, status, location));
+      if (status >= 300 && status < 400) {
+        if (location == null) {
+          break;
+        }
+        nextUrl = location;
+        continue;
+      }
+      if (status == 200) {
+        return response.body();
+      }
+      debug.append("  Response body: ").append(response.body()).append("\n");
+      break;
+    }
+    throw new AssertionError("Login page not reached.\n" + debug);
   }
 
   /**

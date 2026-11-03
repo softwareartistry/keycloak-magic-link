@@ -6,7 +6,7 @@ import io.phasetwo.keycloak.magic.MagicLink;
 import io.phasetwo.keycloak.magic.auth.magic.MagicLinkActionToken;
 import io.phasetwo.keycloak.magic.representation.MagicLinkRequest;
 import io.phasetwo.keycloak.magic.representation.MagicLinkResponse;
-import jakarta.ws.rs.*;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
@@ -41,20 +41,14 @@ public final class MagicLinkResource extends AbstractAdminResource {
 
     UserModel user = MagicLink.findUser(session, realm, emailOrUsername);
 
-    if (user != null) {
-        if (!permissions.users().canManage(user))
-          throw new ForbiddenException("can't manager user " + user.getUsername());
-    } else {
-        if (!forceCreate) {
-            throw new NotFoundException(
-                    String.format(
-                            "User with email/username %s not found, and forceCreate is off.", emailOrUsername));
-        }
-
-        if (!permissions.users().canManage()) {
-            throw new ForbiddenException("magic link requires manage-users");
-        }
-    }
+    // Same 403 whether or not the user exists, so a caller who may not manage a user cannot
+    // probe which usernames/emails are registered.
+    if (user != null ? !permissions.users().canManage(user) : !permissions.users().canManage())
+      throw new ForbiddenException("magic link requires manage-users");
+    if (user == null && !forceCreate)
+      throw new NotFoundException(
+          String.format(
+              "User with email/username %s not found, and forceCreate is off.", emailOrUsername));
 
     ClientModel client = session.clients().getClientByClientId(realm, rep.getClientId());
     if (client == null)
@@ -63,17 +57,18 @@ public final class MagicLinkResource extends AbstractAdminResource {
       throw new BadRequestException(
           String.format("redirectUri %s disallowed by client.", rep.getRedirectUri()));
 
-    // previous lookup failed, permission to manage all users is verified, so try to create the user now
-    if (user == null)
-    {
-        user = MagicLink.getOrCreate(
-                session,
-                realm,
-                emailOrUsername,
-                true,
-                rep.isUpdateProfile(),
-                rep.isUpdatePassword(),
-                MagicLink.registerEvent(event, MAGIC_LINK));
+    // previous lookup failed, permission to manage all users is verified, so try to create the user
+    // now
+    if (user == null) {
+      user =
+          MagicLink.getOrCreate(
+              session,
+              realm,
+              emailOrUsername,
+              true,
+              rep.isUpdateProfile(),
+              rep.isUpdatePassword(),
+              MagicLink.registerEvent(event, MAGIC_LINK));
     }
 
     if (user.getEmail() == null || user.getEmail().isBlank()) {

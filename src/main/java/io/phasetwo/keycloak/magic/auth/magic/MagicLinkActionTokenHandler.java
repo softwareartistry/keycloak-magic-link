@@ -111,11 +111,13 @@ public final class MagicLinkActionTokenHandler
 
     if (!user.isEmailVerified()) {
       user.setEmailVerified(true);
-      tokenContext.getEvent().clone()
-        .event(EventType.VERIFY_EMAIL)
-        .user(user)
-        .detail(Details.EMAIL, user.getEmail())
-        .success();
+      tokenContext
+          .getEvent()
+          .clone()
+          .event(EventType.VERIFY_EMAIL)
+          .user(user)
+          .detail(Details.EMAIL, user.getEmail())
+          .success();
     }
 
     authSession.setUserSessionNote(LOGIN_METHOD, MagicLinkActionTokenHandlerFactory.PROVIDER_ID);

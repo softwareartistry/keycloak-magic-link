@@ -67,6 +67,8 @@ public final class MagicLink {
 
   public static final String CREATE_NONEXISTENT_USER_CONFIG_PROPERTY =
       "ext-magic-create-nonexistent-user";
+  public static final String EMAIL_OTP_SUBJECT_WITH_CODE_CONFIG_PROPERTY =
+      "ext-magic-email-otp-subject-with-code";
 
   public static Consumer<UserModel> registerEvent(
       final EventBuilder event, String authenticatorName) {
@@ -94,6 +96,16 @@ public final class MagicLink {
     return getOrCreate(session, realm, email, forceCreate, updateProfile, updatePassword, null);
   }
 
+  public static UserModel findUser(
+      KeycloakSession session, RealmModel realm, String emailOrUsername) {
+    // username or email is required, if not provided or empty, exit early and return null
+    if (trimToNull(emailOrUsername) == null) {
+      return null;
+    }
+
+    return findUserByNameOrEmail(session, realm, emailOrUsername);
+  }
+
   public static UserModel getOrCreate(
       KeycloakSession session,
       RealmModel realm,
@@ -103,11 +115,7 @@ public final class MagicLink {
       boolean updatePassword,
       Consumer<UserModel> onNew) {
 
-    // username or email is required, if not provided or empty, exit early and return null
-    if (trimToNull(emailOrUsername) == null) {
-      return null;
-    }
-    UserModel user = findUserByNameOrEmail(session, realm, emailOrUsername);
+    UserModel user = findUser(session, realm, emailOrUsername);
     // If the user does not exist, we create it ONLY if forceCreate is true
     if (user == null && forceCreate) {
       user = session.users().addUser(realm, emailOrUsername);
@@ -439,7 +447,8 @@ public final class MagicLink {
     }
   }
 
-  public static boolean sendOtpEmail(KeycloakSession session, UserModel user, String code) {
+  public static boolean sendOtpEmail(
+      KeycloakSession session, UserModel user, String code, Boolean subjectWithCode) {
     RealmModel realm = session.getContext().getRealm();
     ClientModel client = session.getContext().getClient();
     try {
@@ -447,15 +456,16 @@ public final class MagicLink {
           session.getProvider(EmailTemplateProvider.class);
       String realmName = getRealmName(realm);
       String clientName = getClientName(client);
-      List<Object> subjAttr = ImmutableList.of(realmName, clientName);
+      List<Object> subjAttr = ImmutableList.of(realmName, clientName, code);
       Map<String, Object> bodyAttr = Maps.newHashMap();
       bodyAttr.put("code", code);
+      String subjectFormatKey = subjectWithCode ? "otpSubjectWithCode" : "otpSubject";
       emailTemplateProvider
           .setRealm(realm)
           .setUser(user)
           .setAttribute("realmName", realmName)
           .setAttribute("clientName", clientName)
-          .send("otpSubject", subjAttr, "otp-email.ftl", bodyAttr);
+          .send(subjectFormatKey, subjAttr, "otp-email.ftl", bodyAttr);
       return true;
     } catch (EmailException e) {
       log.error("Failed to send otp mail", e);
@@ -590,6 +600,9 @@ public final class MagicLink {
   }
 
   public static boolean isValidEmail(String email) {
+    if (email == null) {
+      return false;
+    }
     try {
       InternetAddress a = new InternetAddress(email);
       a.validate();

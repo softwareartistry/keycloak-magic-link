@@ -22,6 +22,7 @@ import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.utils.FormMessage;
 import org.keycloak.services.messages.Messages;
 
@@ -131,7 +132,9 @@ public class EmailOtpAuthenticator implements Authenticator {
           && code.equals(context.getAuthenticationSession().getAuthNote(USER_AUTH_NOTE_OTP_CODE))) {
         context.getAuthenticationSession().removeAuthNote(USER_AUTH_NOTE_OTP_CODE);
         context.getAuthenticationSession().getAuthenticatedUser().setEmailVerified(true);
-        context.success();
+        // Record the credential type like Keycloak's OTP form does. Brute force protection clears
+        // the failure counters only for recorded types, so the untyped success() never reset them.
+        context.success(OTPCredentialModel.TYPE);
         return;
       }
     } catch (Exception e) {

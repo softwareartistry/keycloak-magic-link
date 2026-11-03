@@ -73,6 +73,47 @@ public class EmailOtpSentInEmailTest extends AbstractMagicLinkWithMailhogTest {
     return results;
   }
 
+  /**
+   * Regression coverage for a correct code never clearing the brute force counters. Keycloak only
+   * clears them for the credential types the flow recorded, and the authenticator called the
+   * untyped {@code context.success()}, so every earlier wrong code stayed counted and users were
+   * eventually locked out by their own typos.
+   */
+  @TestFactory
+  @DisplayName("A correct Email OTP code resets the brute force counters")
+  public List<DynamicContainer> testEmailOtpSuccessResetsBruteForceCounters()
+      throws IOException, InterruptedException, TimeoutException {
+    final var testRealm = setupTestKeycloakInstance("/realms/email-otp-brute-force-setup.json");
+    final var results =
+        new ArrayList<>(
+            runCypressTests(
+                "cypress/e2e/email-otp-brute-force-reset.cy.ts",
+                Map.of("MAILHOG_URL", "http://mailhog:8025")));
+    results.add(
+        DynamicContainer.dynamicContainer(
+            "Brute force protection",
+            List.of(
+                DynamicTest.dynamicTest(
+                    "The successful login clears the earlier failed OTP code",
+                    () -> assertNoFailures(testRealm.getRealm(), TEST_USER)))));
+    return results;
+  }
+
+  private void assertNoFailures(String realmName, String username) {
+    final var realm = keycloak.realm(realmName);
+    final var users = realm.users().search(username, true);
+    assertEquals(1, users.size(), "expected exactly one user named " + username);
+
+    final Map<String, Object> status =
+        realm.attackDetection().bruteForceUserStatus(users.getFirst().getId());
+    log.infof("brute force status for %s: %s", username, status);
+
+    assertEquals(
+        0,
+        ((Number) status.get("numFailures")).intValue(),
+        "a successful Email OTP login did not clear the brute force failure counter");
+  }
+
   private void assertTemporarilyDisabled(String realmName, String username) {
     final var realm = keycloak.realm(realmName);
     final var users = realm.users().search(username, true);

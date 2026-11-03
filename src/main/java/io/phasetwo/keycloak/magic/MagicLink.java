@@ -116,8 +116,9 @@ public final class MagicLink {
       Consumer<UserModel> onNew) {
 
     UserModel user = findUser(session, realm, emailOrUsername);
-    // If the user does not exist, we create it ONLY if forceCreate is true
-    if (user == null && forceCreate) {
+    // If the user does not exist, we create it ONLY if forceCreate is true, and never from a blank
+    // email/username (findUser returns null for those as well)
+    if (user == null && forceCreate && trimToNull(emailOrUsername) != null) {
       user = session.users().addUser(realm, emailOrUsername);
       user.setEnabled(true);
 

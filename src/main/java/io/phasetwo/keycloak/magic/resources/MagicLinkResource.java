@@ -69,6 +69,10 @@ public final class MagicLinkResource extends AbstractAdminResource {
               rep.isUpdateProfile(),
               rep.isUpdatePassword(),
               MagicLink.registerEvent(event, MAGIC_LINK));
+      // getOrCreate() never creates a user from a blank email/username
+      if (user == null)
+        throw new NotFoundException(
+            String.format("User with email/username '%s' not found.", emailOrUsername));
     }
 
     if (user.getEmail() == null || user.getEmail().isBlank()) {

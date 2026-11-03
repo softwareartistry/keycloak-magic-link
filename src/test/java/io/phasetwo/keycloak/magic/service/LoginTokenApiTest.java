@@ -119,6 +119,26 @@ class LoginTokenApiTest extends AbstractMagicLinkTest {
         .statusCode(404);
   }
 
+  // getOrCreate() used to create a user even from a blank email when force_create was on.
+  @Test
+  void createLoginToken_blankEmailWithForceCreate_returnsNotFoundAndCreatesNoUser() {
+    Testcontainers.exposeHostPorts(container.getHttpPort());
+    importRealm("/realms/login-token-api-test-setup.json");
+    int usersBefore = keycloak.realm(TEST_REALM).users().count();
+
+    given()
+        .baseUri(getAuthUrl())
+        .auth()
+        .oauth2(keycloak.tokenManager().getAccessTokenString())
+        .contentType("application/json")
+        .body(Map.of("email", "", "client_id", TEST_CLIENT, "force_create", true))
+        .post(LOGIN_TOKEN_PATH)
+        .then()
+        .statusCode(404);
+
+    assertEquals(usersBefore, keycloak.realm(TEST_REALM).users().count());
+  }
+
   @Test
   void createLoginToken_withUserId_returnsLoginHint() {
     Testcontainers.exposeHostPorts(container.getHttpPort());

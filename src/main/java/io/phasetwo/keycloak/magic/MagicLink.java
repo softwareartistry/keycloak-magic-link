@@ -9,8 +9,6 @@ import com.google.common.collect.Maps;
 import io.phasetwo.keycloak.magic.auth.magic.MagicLinkActionToken;
 import io.phasetwo.keycloak.magic.auth.magic.MagicLinkAuthenticatorFactory;
 import io.phasetwo.keycloak.magic.auth.magic.continuation.MagicLinkContinuationActionToken;
-import jakarta.mail.internet.AddressException;
-import jakarta.mail.internet.InternetAddress;
 import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
 import java.lang.reflect.Method;
@@ -52,6 +50,7 @@ import org.keycloak.services.resources.LoginActionsService;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.theme.Theme;
+import org.keycloak.utils.EmailValidationUtil;
 
 /** common utilities for Magic Link authentication, used by the authenticator and resource */
 @JBossLog
@@ -601,16 +600,9 @@ public final class MagicLink {
   }
 
   public static boolean isValidEmail(String email) {
-    if (email == null) {
-      return false;
-    }
-    try {
-      InternetAddress a = new InternetAddress(email);
-      a.validate();
-      return true;
-    } catch (AddressException e) {
-      return false;
-    }
+    // Keycloak's own check, the one its mail sender applies to recipients. InternetAddress also
+    // accepted display-name and comment forms such as "Eve <alice@example.com>".
+    return email != null && EmailValidationUtil.isValidEmail(email);
   }
 
   public static String getAttemptedUsername(AuthenticationFlowContext context) {

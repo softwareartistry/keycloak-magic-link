@@ -2,6 +2,7 @@ package io.phasetwo.keycloak.magic.auth;
 
 import static io.phasetwo.keycloak.magic.MagicLink.CREATE_NONEXISTENT_USER_CONFIG_PROPERTY;
 import static io.phasetwo.keycloak.magic.MagicLink.EMAIL_OTP;
+import static io.phasetwo.keycloak.magic.MagicLink.EMAIL_OTP_SUBJECT_WITH_CODE_CONFIG_PROPERTY;
 import static io.phasetwo.keycloak.magic.auth.util.Authenticators.is;
 
 import com.google.common.collect.ImmutableList;
@@ -21,6 +22,7 @@ import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.utils.FormMessage;
 import org.keycloak.services.messages.Messages;
 
@@ -71,14 +73,16 @@ public class EmailOtpAuthenticator implements Authenticator {
 
     UserModel user = context.getUser();
     if (user == null) {
-      user = MagicLink.getOrCreate(
-        context.getSession(),
-        context.getRealm(),
-        email,
-        isForceCreate(context, false),
-        false,
-        false,
-        MagicLink.registerEvent(event, EMAIL_OTP));
+      user =
+          MagicLink.getOrCreate(
+              context.getSession(),
+              context.getRealm(),
+              email,
+              // create users only for valid email addresses, not for any input in the form
+              isForceCreate(context, false) && MagicLink.isValidEmail(email),
+              false,
+              false,
+              MagicLink.registerEvent(event, EMAIL_OTP));
 
       if (user == null) {
         log.infof("User with email %s not found.", email);
@@ -88,7 +92,9 @@ public class EmailOtpAuthenticator implements Authenticator {
       context.setUser(user);
     }
 
-    boolean sent = MagicLink.sendOtpEmail(context.getSession(), user, code);
+    boolean sent =
+        MagicLink.sendOtpEmail(
+            context.getSession(), user, code, isEmailSubjectWithCode(context, false));
     if (sent) {
       log.debugf("Sent OTP code %s to email %s", code, context.getUser().getEmail());
       context.getAuthenticationSession().setAuthNote(USER_AUTH_NOTE_OTP_CODE, code);
@@ -100,12 +106,16 @@ public class EmailOtpAuthenticator implements Authenticator {
     log.debug("EmailOtpAuthenticator.action");
 
     UserModel user = context.getUser();
-    String bruteForceError = AuthenticatorUtils.getDisabledByBruteForceEventError(context, user);
-    if (bruteForceError != null) {
-      context.getEvent().user(user);
-      context.getEvent().error(bruteForceError);
-      challenge(context, new FormMessage(disabledByBruteForceError(bruteForceError)), false);
-      return;
+    // user may be null when the flow forwards unknown usernames here to avoid user enumeration.
+    // getDisabledByBruteForceEventError() dereferences the user, so only check it when we have one.
+    if (user != null) {
+      String bruteForceError = AuthenticatorUtils.getDisabledByBruteForceEventError(context, user);
+      if (bruteForceError != null) {
+        context.getEvent().user(user);
+        context.getEvent().error(bruteForceError);
+        challenge(context, new FormMessage(disabledByBruteForceError(bruteForceError)), false);
+        return;
+      }
     }
 
     MultivaluedMap<String, String> formData = context.getHttpRequest().getDecodedFormParameters();
@@ -122,7 +132,9 @@ public class EmailOtpAuthenticator implements Authenticator {
           && code.equals(context.getAuthenticationSession().getAuthNote(USER_AUTH_NOTE_OTP_CODE))) {
         context.getAuthenticationSession().removeAuthNote(USER_AUTH_NOTE_OTP_CODE);
         context.getAuthenticationSession().getAuthenticatedUser().setEmailVerified(true);
-        context.success();
+        // Record the credential type like Keycloak's OTP form does. Brute force protection clears
+        // the failure counters only for recorded types, so the untyped success() never reset them.
+        context.success(OTPCredentialModel.TYPE);
         return;
       }
     } catch (Exception e) {
@@ -158,5 +170,9 @@ public class EmailOtpAuthenticator implements Authenticator {
 
   private boolean isForceCreate(AuthenticationFlowContext context, boolean defaultValue) {
     return is(context, CREATE_NONEXISTENT_USER_CONFIG_PROPERTY, defaultValue);
+  }
+
+  private boolean isEmailSubjectWithCode(AuthenticationFlowContext context, boolean defaultValue) {
+    return is(context, EMAIL_OTP_SUBJECT_WITH_CODE_CONFIG_PROPERTY, defaultValue);
   }
 }

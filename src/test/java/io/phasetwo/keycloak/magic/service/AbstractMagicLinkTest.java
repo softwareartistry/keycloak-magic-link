@@ -9,6 +9,7 @@ import io.phasetwo.keycloak.magic.Helpers;
 import io.restassured.response.Response;
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +75,8 @@ public abstract class AbstractMagicLinkTest {
         new KeycloakContainer(KEYCLOAK_IMAGE)
             .withImagePullPolicy(PullPolicy.alwaysPull())
             .withContextPath("/auth")
+            // Cold Keycloak boots on a loaded CI runner can exceed the 2-minute default.
+            .withStartupTimeout(Duration.ofMinutes(5))
             .withReuse(true)
             .withProviderClassesFrom("target/classes")
             .withExposedPorts(8787, 9000, 8080)

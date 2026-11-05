@@ -14,6 +14,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +93,8 @@ public abstract class AbstractMagicLinkTest {
         new KeycloakContainer(KEYCLOAK_IMAGE)
             .withImagePullPolicy(PullPolicy.alwaysPull())
             .withContextPath("/auth")
+            // Cold Keycloak boots on a loaded CI runner can exceed the 2-minute default.
+            .withStartupTimeout(Duration.ofMinutes(5))
             .withReuse(true)
             .withProviderClassesFrom("target/classes")
             .withProviderLibsFrom(getDeps())

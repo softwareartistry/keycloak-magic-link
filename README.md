@@ -41,7 +41,7 @@ An Authenticator that can run as a form in your login flow. This takes an email,
 
 ![Install Magic Link Authenticator in Browser Flow](docs/assets/magic-link-authenticator.png)
 
-The authenticator can be configured to create a user with the given email address as username/email if none exists. It is also possible to force `UPDATE_PROFILE` and `UPDATE_PASSWORD` required actions when the user is created by this Authenticator:
+The authenticator can be configured to create a user with the given email address as username/email if none exists. This is off by default (`Force create user`), including for an execution without config such as the built-in "magic link" flow, so the login form never registers accounts unless you turn it on. It is also possible to force `UPDATE_PROFILE` and `UPDATE_PASSWORD` required actions when the user is created by this Authenticator:
 
 ![Configure Magic Link Authenticator with options](docs/assets/magic-link-config.png)
 
@@ -172,6 +172,12 @@ public MagicLinkCustomizationProvider create(KeycloakSession session, Map<String
 
 When no customization is needed the provided `DefaultMagicLinkCustomizationProviderFactory` is used automatically. It allows all users through `canAuthenticate` and delegates to the built-in `magic-link-email.ftl` template.
 
+`sendMagicLinkEmail` runs in the background after the login request has finished (see [Email send cooldown and background delivery](#email-send-cooldown-and-background-delivery)). It gets a session whose context carries the realm, client and authentication session, but there is no HTTP request, so it must not read headers, cookies or form data. Resolve anything request-specific in `canAuthenticate`.
+
+#### Built-in: Active Org (`ext-magic-active-org`)
+
+_Magic Link (Active Org)_ only sends a link to users whose `org.ro.active` attribute matches the configured organization (`ext-magic-org-id`, enforced while `ext-magic-org-require-membership` is on). An existing user who is not a member gets a 403 "access denied" page instead of the "check your email" page. Unknown addresses still get the normal page, so this response does tell an attacker that an address has an account outside the organization. That is accepted: use the plain _Magic Link_ authenticator where that matters.
+
 ---
 
 ## Magic link continuation
@@ -182,7 +188,7 @@ This Magic link continuation authenticator is similar to the Magic Link authenti
 
 ![Install Magic Link continuation Authenticator in Browser Flow](docs/assets/magic-link-continuation-authenticator.png)
 
-The authenticator can be configured to set the expiration of the authentication flow.
+The authenticator can be configured to set the expiration of the authentication flow and the [email send cooldown](#email-send-cooldown-and-background-delivery). The waiting page has no Resend button: a user who starts a new login while the cooldown is running gets no new email, so the page should tell them to wait a minute and try again if nothing arrives.
 
 ![Configure Magic Link continuation Authenticator with options](docs/assets/magic-link-continuation-config.png)
 
@@ -487,7 +493,7 @@ Both authenticators send the same activation email: a standard Keycloak execute-
 Email-first browser-flow authenticator. Renders the email-only login form (or consumes an attempted username set by a previous authenticator), then branches:
 
 - **Activated account** — sets the user on the flow and succeeds, so the next execution (typically _Password Form_) prompts for the credential. MFA executions later in the flow run as usual.
-- **Pending account** — sends the activation email and shows a confirmation screen (`view-activation-sent.ftl`) with a Resend button. Resends are throttled by the `Resend cooldown` execution setting (default 30 s per authentication session).
+- **Pending account** — sends the activation email and shows a confirmation screen (`view-activation-sent.ftl`) with a Resend button. A resend has to pass two limits: the `Resend cooldown` execution setting (default 30 s per authentication session) and the per-user [email send cooldown](#email-send-cooldown-and-background-delivery) (default 60 s across all sessions). The Resend button counts down the longer of the two.
 - **Unknown, disabled, or email-less account** — shows the *same* confirmation screen without sending anything. There is deliberately no "email not registered" message and no option to enable one: the response must not disclose whether an account exists.
 
 Example flow:
@@ -578,6 +584,25 @@ A form action designed specifically for the **Registration** flow. It adds the T
 **When to use:** Add it as a form action inside the built-in Registration flow to prevent bots from bulk-creating accounts through self-registration.
 
 ![Cloudflare Turnstile form action in a registration flow](docs/assets/cloudflare-turnstile-registration.png)
+
+## Email send cooldown and background delivery
+
+Every authenticator that emails a user in response to a submitted address — _Magic Link_ (and _Active Org_), _Magic Link continuation_, _Email OTP_, _Activation Gate_ and _Send Activation or Reset Email_ — shares two protections against floods of submissions.
+
+**Per-user cooldown.** At most one email per user per `Email send cooldown (seconds)` (`ext-email-send-cooldown`, default `60`, `0` disables), set on each execution. The cooldown is per user, not per login session, and is shared by all five authenticators and all cluster nodes (it lives in Keycloak's single-use object store). A submission inside the window renders exactly the same page as one that sends, and nothing is sent, so the cooldown cannot be used to tell which addresses have accounts.
+
+- Pages with a Resend button (`view-email.ftl`, `otp-form.ftl`, `view-activation-sent.ftl`) disable it and count down until a resend can send again. The countdown runs for every visitor, account or not. On the OTP form it runs from the first render in the login session, so a wrong code does not restart it. A custom theme that overrides these templates needs `id="kc-resend"` on the button and `<#include "resend-countdown.ftl">` after the form, or a resend inside the window silently does nothing.
+- The countdown is a small inline script. If a realm sets a Content-Security-Policy `script-src` without `'unsafe-inline'`, the browser blocks it and the button stays clickable (Keycloak's default CSP does not restrict scripts).
+- A new login started within the window gets no new email; the earlier email's link or code belongs to the earlier login session. With Email OTP this means a second tab opened within the window has no working code until its Resend is used after the countdown. If that matters for a flow, give its execution a shorter cooldown (for example `30`).
+- The cooldown is claimed before the email is queued. If the request fails in between (a server error, not a user mistake), no email goes out and the user waits out the cooldown before the next one.
+
+**Background delivery.** Rendering and sending the email happens after the login request commits, on a small pool of background threads (4 threads, queue of 1000). A slow or unreachable mail server therefore cannot hold Keycloak's HTTP threads, and known and unknown addresses take the same time to answer. Consequences:
+
+- Delivery failures are only logged; the page cannot report them. For Email OTP the code is stored before the email goes out, so if delivery fails the user uses Resend once the countdown ends.
+- If the queue is full, the email is dropped and a warning is logged. Emails still queued when Keycloak stops are lost. Both behave like a mail-server failure.
+- The email's locale comes from the user's locale or the login session, not the browser's `Accept-Language` header.
+
+The admin `POST realms/{realm}/magic-link` endpoint is not affected: it sends synchronously and has no cooldown.
 
 ## Installation
 

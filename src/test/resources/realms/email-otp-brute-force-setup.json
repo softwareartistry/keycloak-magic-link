@@ -159,7 +159,8 @@
       "id": "d3b6e0f4-5a9c-4e13-8d8f-4b7c1e2a9f35",
       "alias": "email-otp-brute-force-config",
       "config": {
-        "ext-magic-create-nonexistent-user": "false"
+        "ext-magic-create-nonexistent-user": "false",
+        "ext-email-send-cooldown": "5"
       }
     }
   ],

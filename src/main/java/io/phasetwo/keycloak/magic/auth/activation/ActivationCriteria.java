@@ -2,6 +2,7 @@ package io.phasetwo.keycloak.magic.auth.activation;
 
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -125,7 +126,8 @@ public final class ActivationCriteria {
           PENDING_REQUIRED_ACTIONS_PROPERTY,
           EMAIL_ACTIONS_PROPERTY,
           EXPLICIT_ACTIONS_PROPERTY,
-          TOKEN_LIFESPAN_PROPERTY);
+          TOKEN_LIFESPAN_PROPERTY,
+          EmailDispatch.SEND_COOLDOWN_PROPERTY);
 
   /** Config properties for the browser-flow activation gate (adds the resend cooldown). */
   public static final List<ProviderConfigProperty> GATE_CONFIG_PROPERTIES =
@@ -136,7 +138,8 @@ public final class ActivationCriteria {
           EMAIL_ACTIONS_PROPERTY,
           EXPLICIT_ACTIONS_PROPERTY,
           TOKEN_LIFESPAN_PROPERTY,
-          RESEND_COOLDOWN_PROPERTY);
+          RESEND_COOLDOWN_PROPERTY,
+          EmailDispatch.SEND_COOLDOWN_PROPERTY);
 
   private final Map<String, String> config;
 

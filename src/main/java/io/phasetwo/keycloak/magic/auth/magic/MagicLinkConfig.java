@@ -3,6 +3,7 @@ package io.phasetwo.keycloak.magic.auth.magic;
 import static io.phasetwo.keycloak.magic.MagicLink.CREATE_NONEXISTENT_USER_CONFIG_PROPERTY;
 
 import com.google.common.base.Strings;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -34,7 +35,7 @@ public final class MagicLinkConfig {
     FORCE_CREATE_PROPERTY.setLabel("Force create user");
     FORCE_CREATE_PROPERTY.setHelpText(
         "Creates a new user when an email is provided that does not match an existing user.");
-    FORCE_CREATE_PROPERTY.setDefaultValue(true);
+    FORCE_CREATE_PROPERTY.setDefaultValue(false);
 
     UPDATE_PROFILE_PROPERTY = new ProviderConfigProperty();
     UPDATE_PROFILE_PROPERTY.setType(ProviderConfigProperty.BOOLEAN_TYPE);
@@ -76,7 +77,8 @@ public final class MagicLinkConfig {
           UPDATE_PROFILE_PROPERTY,
           UPDATE_PASSWORD_PROPERTY,
           TOKEN_PERSISTENT_PROPERTY,
-          TOKEN_LIFESPAN_PROPERTY);
+          TOKEN_LIFESPAN_PROPERTY,
+          EmailDispatch.SEND_COOLDOWN_PROPERTY);
 
   private final Map<String, String> config;
 
@@ -87,9 +89,13 @@ public final class MagicLinkConfig {
             : Map.of();
   }
 
-  /** Whether to create a new realm user when the submitted email has no match. */
+  /**
+   * Whether to create a new realm user when the submitted email has no match. Off unless enabled
+   * explicitly, so an execution without config (such as the built-in "magic link" flow) never
+   * creates accounts from the login form.
+   */
   public boolean isForceCreate() {
-    return getBoolean(CREATE_NONEXISTENT_USER_CONFIG_PROPERTY, true);
+    return getBoolean(CREATE_NONEXISTENT_USER_CONFIG_PROPERTY, false);
   }
 
   /** Whether to add {@code UPDATE_PROFILE} as a required action on newly created users. */

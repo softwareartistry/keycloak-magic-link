@@ -40,5 +40,6 @@
           </div>
         </div>
       </form>
+      <#include "resend-countdown.ftl">
     </#if>
 </@layout.registrationLayout>

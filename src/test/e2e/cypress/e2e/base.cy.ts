@@ -1,3 +1,4 @@
+import { waitForMail } from "../support/mailhog";
 import {mailhogBaseUrl, testRealmLoginUri} from "../fixtures/uri";
 import { user1, } from "../fixtures/users";
 
@@ -32,7 +33,10 @@ describe('Basic tests with the Magic Link Provider', () => {
       cy.contains('Personal')
    })
 
-   it('Resend button on the waiting page sends a second magic link that can be used to log in', () => {
+   it('Resend counts down the send cooldown, then sends a second magic link that can be used to log in', () => {
+      // The previous test emailed user1; let the fixture's 5s per-user send cooldown pass first
+      cy.wait(5000);
+
       // Start with empty inbox so we can assert exact counts
       cy.request('DELETE', mailhogBaseUrl + '/api/v1/messages');
 
@@ -41,21 +45,31 @@ describe('Basic tests with the Magic Link Provider', () => {
       cy.get('#username').type(user1.username);
       cy.get('#kc-login').click();
       cy.contains('Check your email, and click on the link to log in!');
-
-      // Wait for first email to arrive, then click Resend
       cy.wrap(null).then(() => fetchLoginEmail(user1.username));
-      cy.contains('Resend').click();
+
+      // Resend is disabled while the fixture's 5s send cooldown runs
+      cy.get('#kc-resend').should('be.disabled').and('contain', 's)');
+
+      // A fresh session for the same user inside the cooldown gets the same page but no email
+      cy.clearCookies();
+      cy.visit(testRealmLoginUri);
+      cy.get('#username').type(user1.username);
+      cy.get('#kc-login').click();
+      cy.contains('Check your email, and click on the link to log in!');
+      cy.wait(2000);
+      cy.request(mailhogBaseUrl + '/api/v2/messages').then((response) => {
+         expect(response.body.total, 'emails inside the cooldown').to.equal(1);
+      });
+
+      // Once the countdown ends, Resend sends a second email
+      cy.get('#kc-resend', { timeout: 10000 }).should('not.be.disabled').click();
       cy.contains('Check your email, and click on the link to log in!');
 
       // Fetch second (most recent) email - Mailhog returns newest first
       cy.wrap(null)
-          .then(() => fetchLoginEmail(user1.username))
+          .then(() => waitForMail(user1.username, 'Log in to Test Realm Display Name', 'resent login email', 2))
           .then((mail) => {
-              const body =
-                  mail.Content.Body ||
-                  mail.Content.Headers['Content-Type']?.includes('text/html')
-                      ? mail.Content.Body
-                      : ''
+              const body = mail.Content.Body
 
               expect(body).to.contain('Someone requested a login link to Test Realm Display Name')
 
@@ -64,7 +78,7 @@ describe('Basic tests with the Magic Link Provider', () => {
               cy.visit(loginLink)
           });
 
-      // Both the original and resent email should be in Mailhog
+      // Exactly the original and the resent email: the in-cooldown submit sent nothing
       cy.request(mailhogBaseUrl + '/api/v2/messages').then((response) => {
           expect(response.body.total).to.equal(2);
       });
@@ -97,29 +111,7 @@ describe('Basic tests with the Magic Link Provider', () => {
 });
 
 function fetchLoginEmail(toEmail) {
-   return cy
-       .request({
-          method: 'GET',
-          url: mailhogBaseUrl + '/api/v2/messages',
-          retryOnStatusCodeFailure: true,
-       })
-       .then((res) => {
-          const messages = res.body.items
-
-          // find the email sent to example@example.com with subject containing "Log in to"
-          const mail = messages.find((msg) => {
-             const to = msg.To.map((t) => t.Mailbox + '@' + t.Domain)
-             const subject = msg.Content.Headers.Subject?.[0] || ''
-
-             return (
-                 to.includes(toEmail) &&
-                 subject.includes('Log in to Test Realm Display Name')
-             )
-          })
-
-          expect(mail, 'login email').to.exist
-          return mail
-       })
+    return waitForMail(toEmail, 'Log in to Test Realm Display Name', 'login email')
 }
 
 function extractLoginLink(body) {

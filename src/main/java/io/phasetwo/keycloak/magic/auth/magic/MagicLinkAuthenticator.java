@@ -6,6 +6,7 @@ import static org.keycloak.services.validation.Validation.FIELD_USERNAME;
 import io.phasetwo.keycloak.magic.MagicLink;
 import io.phasetwo.keycloak.magic.auth.magic.spi.MagicLinkCustomizationProvider;
 import io.phasetwo.keycloak.magic.auth.magic.spi.MagicLinkCustomizationProviderFactory;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import lombok.extern.jbosslog.JBossLog;
@@ -101,8 +102,10 @@ public final class MagicLinkAuthenticator extends UsernamePasswordForm {
           .setAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME, email);
       log.debugf("user attempted to login with username/email: %s", email);
       context.forceChallenge(
-          MagicLink.addLinkExpirationFormAttributes(
-                  context.form(), context.getSession(), user, expirationInMinutes)
+          EmailDispatch.withResendCountdown(
+                  MagicLink.addLinkExpirationFormAttributes(
+                      context.form(), context.getSession(), user, expirationInMinutes),
+                  EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))
               .createForm("view-email.ftl"));
       return;
     }
@@ -120,24 +123,45 @@ public final class MagicLinkAuthenticator extends UsernamePasswordForm {
       return;
     }
 
-    MagicLinkActionToken token =
-        MagicLink.createActionToken(
-            user,
-            clientId,
-            config.getTokenLifespan(),
-            rememberMe(context),
-            context.getAuthenticationSession(),
-            config.isTokenPersistent());
-    String link = MagicLink.linkFromActionToken(context.getSession(), context.getRealm(), token);
-    boolean sent = customization.sendMagicLinkEmail(context.getSession(), user, link, config);
-    log.debugf("sent email to %s? %b. Link? %s", user.getEmail(), sent, link);
+    // A throttled send gets exactly the same waiting page as a real one, so the cooldown can't be
+    // used to tell which addresses have accounts.
+    if (EmailDispatch.tryAcquire(
+        context.getSession(),
+        context.getRealm(),
+        user,
+        EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))) {
+      MagicLinkActionToken token =
+          MagicLink.createActionToken(
+              user,
+              clientId,
+              config.getTokenLifespan(),
+              rememberMe(context),
+              context.getAuthenticationSession(),
+              config.isTokenPersistent());
+      String link = MagicLink.linkFromActionToken(context.getSession(), context.getRealm(), token);
+      EmailDispatch.sendAsync(
+          context,
+          user,
+          "magic link",
+          (s, u) -> {
+            boolean sent =
+                customizationProviderFactory
+                    .create(s, config.raw())
+                    .sendMagicLinkEmail(s, u, link, config);
+            log.debugf("sent email to %s? %b. Link? %s", u.getEmail(), sent, link);
+          });
+    } else {
+      log.debugf("Skipping magic link email: send cooldown active for user");
+    }
 
     context
         .getAuthenticationSession()
         .setAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME, email);
     context.challenge(
-        MagicLink.addLinkExpirationFormAttributes(
-                context.form(), context.getSession(), user, expirationInMinutes)
+        EmailDispatch.withResendCountdown(
+                MagicLink.addLinkExpirationFormAttributes(
+                    context.form(), context.getSession(), user, expirationInMinutes),
+                EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))
             .createForm("view-email.ftl"));
   }
 

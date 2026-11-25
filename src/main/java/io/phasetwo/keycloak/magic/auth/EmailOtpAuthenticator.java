@@ -7,6 +7,7 @@ import static io.phasetwo.keycloak.magic.auth.util.Authenticators.is;
 
 import com.google.common.collect.ImmutableList;
 import io.phasetwo.keycloak.magic.MagicLink;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import lombok.extern.jbosslog.JBossLog;
@@ -40,9 +41,15 @@ public class EmailOtpAuthenticator implements Authenticator {
   private void challenge(
       AuthenticationFlowContext context, FormMessage errorMessage, boolean triggerBruteForce) {
     var email = MagicLink.getAttemptedUsername(context);
-    sendOtp(context, email);
+    sendOtp(context, email, false);
 
-    LoginFormsProvider form = context.form().setExecution(context.getExecution().getId());
+    // The form re-renders after every wrong code, so count down only what is left of the cooldown.
+    LoginFormsProvider form =
+        EmailDispatch.withResendCountdown(
+            context.form().setExecution(context.getExecution().getId()),
+            EmailDispatch.countdownRemaining(
+                context.getAuthenticationSession(),
+                EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig())));
     if (errorMessage != null) {
       form.setErrors(ImmutableList.of(errorMessage));
     }
@@ -62,13 +69,18 @@ public class EmailOtpAuthenticator implements Authenticator {
     context.challenge(response);
   }
 
-  private void sendOtp(AuthenticationFlowContext context, String email) {
-    if (context.getAuthenticationSession().getAuthNote(USER_AUTH_NOTE_OTP_CODE) != null) {
+  /**
+   * Sends a new code unless one is already pending in this session. {@code resend} replaces the
+   * pending code, but only if the send cooldown allows a new email. Otherwise the pending code stays
+   * valid, so a resend inside the window never leaves the user without a working code.
+   */
+  private void sendOtp(AuthenticationFlowContext context, String email, boolean resend) {
+    if (!resend
+        && context.getAuthenticationSession().getAuthNote(USER_AUTH_NOTE_OTP_CODE) != null) {
       log.debugf("Skipping sending OTP email to %s because auth note isn't empty", email);
       return;
     }
 
-    String code = SecretGenerator.getInstance().randomString(6, SecretGenerator.DIGITS);
     EventBuilder event = context.newEvent();
 
     UserModel user = context.getUser();
@@ -92,13 +104,32 @@ public class EmailOtpAuthenticator implements Authenticator {
       context.setUser(user);
     }
 
-    boolean sent =
-        MagicLink.sendOtpEmail(
-            context.getSession(), user, code, isEmailSubjectWithCode(context, false));
-    if (sent) {
-      log.debugf("Sent OTP code %s to email %s", code, context.getUser().getEmail());
-      context.getAuthenticationSession().setAuthNote(USER_AUTH_NOTE_OTP_CODE, code);
+    // A throttled send renders the same OTP form, so the cooldown can't be used to tell which
+    // addresses have accounts.
+    if (!EmailDispatch.tryAcquire(
+        context.getSession(),
+        context.getRealm(),
+        user,
+        EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))) {
+      log.debugf("Skipping OTP email: send cooldown active for user");
+      return;
     }
+
+    String code = SecretGenerator.getInstance().randomString(6, SecretGenerator.DIGITS);
+    // The send is asynchronous, so the code is stored before delivery is known. If delivery fails,
+    // the user can resend once the cooldown has passed.
+    context.getAuthenticationSession().setAuthNote(USER_AUTH_NOTE_OTP_CODE, code);
+    boolean subjectWithCode = isEmailSubjectWithCode(context, false);
+    EmailDispatch.sendAsync(
+        context,
+        user,
+        "email OTP",
+        (s, u) -> {
+          boolean sent = MagicLink.sendOtpEmail(s, u, code, subjectWithCode);
+          if (sent) {
+            log.debugf("Sent OTP code %s to email %s", code, u.getEmail());
+          }
+        });
   }
 
   @Override
@@ -120,7 +151,8 @@ public class EmailOtpAuthenticator implements Authenticator {
 
     MultivaluedMap<String, String> formData = context.getHttpRequest().getDecodedFormParameters();
     if (formData.containsKey("resend")) {
-      context.getAuthenticationSession().removeAuthNote(USER_AUTH_NOTE_OTP_CODE);
+      sendOtp(context, MagicLink.getAttemptedUsername(context), true);
+      EmailDispatch.restartCountdown(context.getAuthenticationSession());
       challenge(context, null, false);
       return;
     }

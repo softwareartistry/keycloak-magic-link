@@ -13,6 +13,9 @@
   <#elseif section = "form">
     <div id="mlc-status">${msg("magicLinkContinuationWaiting")!msg("magicLinkContinuationConfirmation")}</div>
     <div id="mlc-exp"></div>
+    <#-- A new login inside the per-user email send cooldown gets no new email, and this page has no
+         Resend button, so tell the user what to do if nothing arrives. -->
+    <div id="mlc-not-received">${msg("magicLinkContinuationNotReceived")}</div>
     <script>
       (function(){
         const pollingUrl = "${pollingUrl!""}";

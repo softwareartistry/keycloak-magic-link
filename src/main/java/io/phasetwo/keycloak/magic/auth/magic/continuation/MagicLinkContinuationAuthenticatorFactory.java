@@ -3,6 +3,7 @@ package io.phasetwo.keycloak.magic.auth.magic.continuation;
 import static io.phasetwo.keycloak.magic.MagicLink.CREATE_NONEXISTENT_USER_CONFIG_PROPERTY;
 
 import com.google.auto.service.AutoService;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants;
 import java.util.List;
 import lombok.extern.jbosslog.JBossLog;
@@ -75,7 +76,9 @@ public class MagicLinkContinuationAuthenticatorFactory implements AuthenticatorF
     createUser.setLabel("Force create user");
     createUser.setHelpText(
         "Creates a new user when an email is provided that does not match an existing user.");
-    createUser.setDefaultValue(true);
+    // Must match the authenticator's runtime default (isForceCreate(context, false)), which applies
+    // when an execution has no config attached.
+    createUser.setDefaultValue(false);
 
     // Expiration time property configuration
     ProviderConfigProperty timeout = new ProviderConfigProperty();
@@ -86,7 +89,7 @@ public class MagicLinkContinuationAuthenticatorFactory implements AuthenticatorF
         "Magic link authenticator expiration time in minutes. Default expiration period 10 minutes.");
     timeout.setDefaultValue("10");
 
-    return List.of(createUser, timeout);
+    return List.of(createUser, timeout, EmailDispatch.SEND_COOLDOWN_PROPERTY);
   }
 
   @Override

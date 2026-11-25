@@ -4,6 +4,7 @@ import static org.keycloak.authentication.authenticators.browser.AbstractUsernam
 import static org.keycloak.services.validation.Validation.FIELD_USERNAME;
 
 import io.phasetwo.keycloak.magic.MagicLink;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
@@ -98,18 +99,32 @@ public final class ActivationGateAuthenticator extends UsernamePasswordForm {
           .detail(ATTEMPTED_USERNAME, email)
           .event(EventType.LOGIN_ERROR)
           .error(error);
-      context.forceChallenge(context.form().createForm(VIEW_TEMPLATE));
+      context.forceChallenge(sentPage(context, config).createForm(VIEW_TEMPLATE));
       return;
     }
 
     if (config.isPending(user)) {
       maybeSendActivationEmail(context, config, user);
-      context.challenge(context.form().createForm(VIEW_TEMPLATE));
+      context.challenge(sentPage(context, config).createForm(VIEW_TEMPLATE));
       return;
     }
 
     context.setUser(user);
     context.success();
+  }
+
+  /**
+   * The "activation sent" page with its Resend countdown. A resend has to pass both the
+   * session-scoped resend cooldown and the per-user send cooldown, so it counts down the longer of
+   * the two.
+   */
+  private static LoginFormsProvider sentPage(
+      AuthenticationFlowContext context, ActivationCriteria config) {
+    return EmailDispatch.withResendCountdown(
+        context.form(),
+        Math.max(
+            config.getResendCooldownSeconds(),
+            EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig())));
   }
 
   private void maybeSendActivationEmail(
@@ -127,10 +142,23 @@ public final class ActivationGateAuthenticator extends UsernamePasswordForm {
       }
     }
 
+    // The session-scoped resend cooldown above only spaces out resends inside one session. This one
+    // is per user across all sessions and authenticators. A throttled send still shows the same
+    // page, so neither check can be used to tell which addresses have accounts.
+    if (!EmailDispatch.tryAcquire(
+        context.getSession(),
+        context.getRealm(),
+        user,
+        EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))) {
+      log.debugf("Skipping activation email: send cooldown active for user");
+      return;
+    }
+
     int lifespan = config.getTokenLifespan(context.getRealm());
     List<String> actions = config.emailActions(user);
     String link = ActivationEmail.buildLink(context, user, actions, lifespan);
-    ActivationEmail.send(context, user, link, lifespan);
+    EmailDispatch.sendAsync(
+        context, user, "account activation", (s, u) -> ActivationEmail.send(s, u, link, lifespan));
     context.getAuthenticationSession().setAuthNote(EMAIL_SENT_AT_NOTE, Integer.toString(now));
 
     context

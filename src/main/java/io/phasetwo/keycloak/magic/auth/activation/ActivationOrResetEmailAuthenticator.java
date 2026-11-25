@@ -1,6 +1,7 @@
 package io.phasetwo.keycloak.magic.auth.activation;
 
 import io.phasetwo.keycloak.magic.MagicLink;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import lombok.extern.jbosslog.JBossLog;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.Authenticator;
@@ -54,18 +55,32 @@ public final class ActivationOrResetEmailAuthenticator implements Authenticator 
       return;
     }
 
-    int lifespan = config.getTokenLifespan(context.getRealm());
-    String link = ActivationEmail.buildLink(context, user, config.emailActions(user), lifespan);
-    ActivationEmail.send(context, user, link, lifespan);
+    // A throttled send still gets the same "email sent" response, so the cooldown can't be used to
+    // tell which addresses have accounts.
+    if (EmailDispatch.tryAcquire(
+        context.getSession(),
+        context.getRealm(),
+        user,
+        EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))) {
+      int lifespan = config.getTokenLifespan(context.getRealm());
+      String link = ActivationEmail.buildLink(context, user, config.emailActions(user), lifespan);
+      EmailDispatch.sendAsync(
+          context,
+          user,
+          "account activation",
+          (s, u) -> ActivationEmail.send(s, u, link, lifespan));
 
-    context
-        .getEvent()
-        .clone()
-        .event(EventType.SEND_VERIFY_EMAIL)
-        .user(user)
-        .detail(Details.USERNAME, user.getUsername())
-        .detail(Details.EMAIL, user.getEmail())
-        .success();
+      context
+          .getEvent()
+          .clone()
+          .event(EventType.SEND_VERIFY_EMAIL)
+          .user(user)
+          .detail(Details.USERNAME, user.getUsername())
+          .detail(Details.EMAIL, user.getEmail())
+          .success();
+    } else {
+      log.debugf("Skipping activation email: send cooldown active for user");
+    }
 
     context.forkWithSuccessMessage(new FormMessage(Messages.EMAIL_SENT));
   }

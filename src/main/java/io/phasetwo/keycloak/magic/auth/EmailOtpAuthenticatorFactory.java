@@ -4,6 +4,7 @@ import static io.phasetwo.keycloak.magic.MagicLink.CREATE_NONEXISTENT_USER_CONFI
 import static io.phasetwo.keycloak.magic.MagicLink.EMAIL_OTP_SUBJECT_WITH_CODE_CONFIG_PROPERTY;
 
 import com.google.auto.service.AutoService;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import java.util.List;
 import lombok.extern.jbosslog.JBossLog;
 import org.keycloak.Config;
@@ -86,7 +87,7 @@ public class EmailOtpAuthenticatorFactory implements AuthenticatorFactory {
     subjectWithCode.setLabel("Email subject with code");
     subjectWithCode.setHelpText("Insert the OTP code into the email subject.");
 
-    return List.of(createUser, subjectWithCode);
+    return List.of(createUser, subjectWithCode, EmailDispatch.SEND_COOLDOWN_PROPERTY);
   }
 
   @Override

@@ -17,6 +17,7 @@
         <div id="kc-form-buttons" class="${properties.kcFormButtonsClass!}">
           <button
             type="submit"
+            id="kc-resend"
             name="resend"
             value="resend"
             class="${properties.kcButtonClass!} ${properties.kcButtonDefaultClass!} ${properties.kcButtonBlockClass!} ${properties.kcButtonLargeClass!}"
@@ -26,5 +27,6 @@
         </div>
       </div>
     </form>
+    <#include "resend-countdown.ftl">
   </#if>
 </@layout.registrationLayout>

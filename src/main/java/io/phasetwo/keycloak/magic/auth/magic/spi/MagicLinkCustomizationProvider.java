@@ -27,10 +27,18 @@ public interface MagicLinkCustomizationProvider extends Provider {
    * @param config the typed authenticator config
    * @return {@code true} to continue, {@code false} to abort
    */
-  boolean canAuthenticate(AuthenticationFlowContext context, UserModel user, MagicLinkConfig config);
+  boolean canAuthenticate(
+      AuthenticationFlowContext context, UserModel user, MagicLinkConfig config);
 
   /**
    * Send the magic link to the user.
+   *
+   * <p>Called on a background thread after the login request has committed, in a new session whose
+   * context carries the realm, client and authentication session (see {@code
+   * EmailDispatch#sendAsync}). There is no HTTP request: do not read request headers, cookies or
+   * the form here. Anything needed from the request must be resolved in {@link #canAuthenticate}.
+   * The provider is created again for this call, so instance state set during {@code
+   * canAuthenticate} is not visible.
    *
    * @param session the active Keycloak session
    * @param user the recipient

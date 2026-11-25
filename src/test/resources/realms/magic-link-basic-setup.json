@@ -145,7 +145,8 @@
       "id": "2806f623-b7dc-4040-b1b7-91c50abd2368",
       "alias": "magic-link-config",
       "config": {
-        "ext-magic-create-nonexistent-user": "false"
+        "ext-magic-create-nonexistent-user": "false",
+        "ext-email-send-cooldown": "5"
       }
     }
   ],

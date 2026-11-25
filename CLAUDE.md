@@ -17,8 +17,8 @@ mvn test -Dtest=MagicLinkApiTest
 # Run a single test method
 mvn test -Dtest=MagicLinkApiTest#createMagicLinkWithExplicitLoa_acrClaimMatchesRequestedLoa
 
-# Format code (Google Java style)
-mvn fmt:format
+# Format code (Google Java style, via Spotless)
+mvn spotless:apply
 
 # Build without running tests
 mvn clean package -DskipTests
@@ -43,7 +43,7 @@ This is a **Keycloak SPI extension** — a JAR deployed into a Keycloak server's
 - `MagicLinkAuthenticator` — Extends `UsernamePasswordForm`. Resolves/creates users, delegates `canAuthenticate` and `sendMagicLinkEmail` to the active `MagicLinkCustomizationProvider`, creates a `MagicLinkActionToken`, and shows a waiting screen.
 - `MagicLinkActionToken` — JWT subclass encoding OIDC params (`rdu`, `scope`, `state`, `nce`, `cc`, `ccm`, `rme`, `ru`, `rm`, `loa`, `eid`). Token type: `ext-magic-link`.
 - `MagicLinkActionTokenHandler` / `MagicLinkActionTokenHandlerFactory` (provider ID: `ext-magic-link`) — Called when the magic link URL is visited. Bypasses the normal browser flow entirely, so it manually replicates what Keycloak's flow machinery would do: sets AMR via `AuthenticatorUtils.updateCompletedExecutions()`, sets LOA via `AcrStore.setLevelAuthenticated()`, and merges existing session state (LOA, AMR, remember-me) into the new `AuthenticationSession` when the browser already has an active session (session continuity).
-- `MagicLinkConfig` — Typed wrapper around the authenticator config map. Config properties: `CREATE_NONEXISTENT_USER_CONFIG_PROPERTY`, `UPDATE_PROFILE_ACTION_CONFIG_PROPERTY`, `UPDATE_PASSWORD_ACTION_CONFIG_PROPERTY`, `ACTION_TOKEN_PERSISTENT_CONFIG_PROPERTY`, `ACTION_TOKEN_LIFE_SPAN`.
+- `MagicLinkConfig` — Typed wrapper around the authenticator config map. Config properties: `CREATE_NONEXISTENT_USER_CONFIG_PROPERTY` (default off, also when the execution has no config), `UPDATE_PROFILE_ACTION_CONFIG_PROPERTY`, `UPDATE_PASSWORD_ACTION_CONFIG_PROPERTY`, `ACTION_TOKEN_PERSISTENT_CONFIG_PROPERTY`, `ACTION_TOKEN_LIFE_SPAN`.
 
 **Magic Link customization extension point** (`src/main/java/.../auth/magic/spi/`):
 - `MagicLinkCustomizationProvider` — Interface with two extension points: `canAuthenticate()` (gate user before token creation) and `sendMagicLinkEmail()` (custom email delivery).
@@ -63,6 +63,7 @@ This is a **Keycloak SPI extension** — a JAR deployed into a Keycloak server's
 - `MagicLinkContinuationStatusProvider` / `MagicLinkContinuationStatusProviderFactory` (provider ID: `magic-link-continuation`) — Public REST endpoint at `realms/{realm}/magic-link-continuation/{sessionId}/{tabId}/status`. Returns JSON `{ state: pending|confirmed|expired, expires_in: … }` for the polling tab.
 
 **Other authenticators** (`src/main/java/.../auth/`):
+- `util/EmailDispatch` — Shared by every authenticator that emails a user from a submitted address (magic link, continuation, email OTP, both activation authenticators). `tryAcquire` is a per-user, cluster-wide send cooldown (`SingleUseObjectProvider.putIfAbsent`, config `ext-email-send-cooldown`, default 60 s); `sendAsync` renders and sends after the request commits, on a bounded background executor, in a new session carrying the realm, client and auth session. A throttled submission must render the same page as a sent one. Pages with a Resend button get a countdown via `withResendCountdown` and `resend-countdown.ftl`.
 - `EmailOtpAuthenticator` — Standalone 6-digit OTP via email. Reports credential type `otp`, so failed codes count toward brute-force lockout.
 - `LoginTokenVerifier` / `LoginTokenVerifierFactory` (provider ID: `login-token-verifier`, display name: **"Login Token (with login_hint)"**) — Reads `login_hint=lt:{uuid}` from the OIDC auth request and verifies the token. Passes through silently (`context.attempted()`) when `login_hint` is absent or has a different prefix.
 - `LoginTokenFormAuthenticator` / `LoginTokenFormAuthenticatorFactory` (provider ID: `login-token-form`, display name: **"Login Token"**) — Shows a form for manual token entry. Accepts tokens with or without the `lt:` prefix. Shows a form error on invalid/expired tokens rather than falling through silently.
@@ -98,7 +99,7 @@ Factories use `@AutoService` to generate `META-INF/services/` entries at compile
 
 ### Code Style
 
-Code is formatted with `fmt-maven-plugin` (Google Java style). Run `mvn fmt:format` before committing. Logging uses `@JBossLog` (Lombok) which generates a `log` field backed by JBoss Logging.
+Code is formatted with Spotless (Google Java style). Run `mvn spotless:apply` before committing; `mvn spotless:check` verifies. Logging uses `@JBossLog` (Lombok) which generates a `log` field backed by JBoss Logging.
 
 ---
 

@@ -15,6 +15,7 @@ import static io.phasetwo.keycloak.magic.auth.util.MagicLinkConstants.TIMEOUT;
 import static org.keycloak.services.validation.Validation.FIELD_USERNAME;
 
 import io.phasetwo.keycloak.magic.MagicLink;
+import io.phasetwo.keycloak.magic.auth.util.EmailDispatch;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import java.time.ZonedDateTime;
@@ -215,14 +216,29 @@ public class MagicLinkContinuationAuthenticator extends UsernamePasswordForm {
 
     int timeout = getTimeout(context, 10);
 
-    int validityInSecs = 60 * timeout;
-    MagicLinkContinuationActionToken token =
-        MagicLink.createExpandedActionToken(
-            user, clientId, validityInSecs, context.getAuthenticationSession());
-    String link = MagicLink.linkFromActionToken(context.getSession(), context.getRealm(), token);
-    boolean sent =
-        MagicLink.sendMagicLinkContinuationEmail(context.getSession(), user, link, timeout);
-    log.debugf("sent email to %s? %b. Link? %s", user.getEmail(), sent, link);
+    // A throttled send gets exactly the same pending page as a real one, so the cooldown can't be
+    // used to tell which addresses have accounts.
+    if (EmailDispatch.tryAcquire(
+        context.getSession(),
+        context.getRealm(),
+        user,
+        EmailDispatch.cooldownSeconds(context.getAuthenticatorConfig()))) {
+      int validityInSecs = 60 * timeout;
+      MagicLinkContinuationActionToken token =
+          MagicLink.createExpandedActionToken(
+              user, clientId, validityInSecs, context.getAuthenticationSession());
+      String link = MagicLink.linkFromActionToken(context.getSession(), context.getRealm(), token);
+      EmailDispatch.sendAsync(
+          context,
+          user,
+          "magic link continuation",
+          (s, u) -> {
+            boolean sent = MagicLink.sendMagicLinkContinuationEmail(s, u, link, timeout);
+            log.debugf("sent email to %s? %b. Link? %s", u.getEmail(), sent, link);
+          });
+    } else {
+      log.debugf("Skipping magic link continuation email: send cooldown active for user");
+    }
 
     challengePending(context, email);
   }

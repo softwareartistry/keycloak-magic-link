@@ -12,6 +12,8 @@ import org.keycloak.authentication.actiontoken.execactions.ExecuteActionsActionT
 import org.keycloak.common.util.Time;
 import org.keycloak.email.EmailException;
 import org.keycloak.email.EmailTemplateProvider;
+import org.keycloak.models.KeycloakContext;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
@@ -48,12 +50,16 @@ final class ActivationEmail {
         .toString();
   }
 
-  /** Renders and sends the activation email within the current transaction. */
-  static void send(
-      AuthenticationFlowContext context, UserModel user, String link, int lifespanSecs) {
-    RealmModel realm = context.getRealm();
+  /**
+   * Renders and sends the activation email. The realm, client and (if present) authentication
+   * session come from {@code session}'s context, so this can run in a background session prepared
+   * by {@link io.phasetwo.keycloak.magic.auth.util.EmailDispatch#sendAsync}.
+   */
+  static void send(KeycloakSession session, UserModel user, String link, int lifespanSecs) {
+    KeycloakContext ctx = session.getContext();
+    RealmModel realm = ctx.getRealm();
     String realmName = MagicLink.getRealmName(realm);
-    String clientName = MagicLink.getClientName(context.getAuthenticationSession().getClient());
+    String clientName = MagicLink.getClientName(ctx.getClient());
     // the template provider mutates this map, so it must not be immutable
     Map<String, Object> bodyAttr = Maps.newHashMap();
     bodyAttr.put("realmName", realmName);
@@ -61,14 +67,13 @@ final class ActivationEmail {
     bodyAttr.put("activationLink", link);
     bodyAttr.put("linkExpirationMinutes", Long.toString(TimeUnit.SECONDS.toMinutes(lifespanSecs)));
     try {
-      context
-          .getSession()
-          .getProvider(EmailTemplateProvider.class)
-          .setRealm(realm)
-          .setUser(user)
-          .setAuthenticationSession(context.getAuthenticationSession())
-          .send(
-              EMAIL_SUBJECT_KEY, ImmutableList.of(realmName, clientName), EMAIL_TEMPLATE, bodyAttr);
+      EmailTemplateProvider emails =
+          session.getProvider(EmailTemplateProvider.class).setRealm(realm).setUser(user);
+      if (ctx.getAuthenticationSession() != null) {
+        emails.setAuthenticationSession(ctx.getAuthenticationSession());
+      }
+      emails.send(
+          EMAIL_SUBJECT_KEY, ImmutableList.of(realmName, clientName), EMAIL_TEMPLATE, bodyAttr);
     } catch (EmailException e) {
       log.error("Failed to send account activation email", e);
     }

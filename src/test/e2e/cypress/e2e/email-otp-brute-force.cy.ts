@@ -1,3 +1,4 @@
+import { waitForMail } from "../support/mailhog";
 import { mailhogBaseUrl, emailOtpBruteForceRealmLoginUri } from "../fixtures/uri";
 import { user1 } from "../fixtures/users";
 
@@ -28,8 +29,9 @@ describe('Email OTP authenticator with brute force protection enabled', () => {
         cy.contains('We are sorry').should('not.exist');
         cy.contains('Unexpected error').should('not.exist');
 
-        // Resending also runs after the brute force check.
-        cy.get('#kc-resend').click();
+        // Resending also runs after the brute force check. The button counts down the send
+        // cooldown (5s in this fixture) before it can be used.
+        cy.get('#kc-resend', { timeout: 10000 }).should('not.be.disabled').click();
         cy.contains('Enter access code');
         cy.contains('We are sorry').should('not.exist');
 
@@ -68,28 +70,7 @@ describe('Email OTP authenticator with brute force protection enabled', () => {
 });
 
 function fetchOtpEmail(toEmail) {
-    return cy
-        .request({
-            method: 'GET',
-            url: mailhogBaseUrl + '/api/v2/messages',
-            retryOnStatusCodeFailure: true,
-        })
-        .then((res) => {
-            const messages = res.body.items
-
-            const mail = messages.find((msg) => {
-                const to = msg.To.map((t) => t.Mailbox + '@' + t.Domain)
-                const subject = msg.Content.Headers.Subject?.[0] || ''
-
-                return (
-                    to.includes(toEmail) &&
-                    subject.includes('Your access code for')
-                )
-            })
-
-            expect(mail, 'otp email').to.exist
-            return mail
-        })
+    return waitForMail(toEmail, 'Your access code for', 'otp email')
 }
 
 function extractOtpCode(body) {

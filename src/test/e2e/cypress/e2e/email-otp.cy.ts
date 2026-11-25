@@ -1,3 +1,4 @@
+import { waitForMail } from "../support/mailhog";
 import { mailhogBaseUrl, emailOtpRealmLoginUri } from "../fixtures/uri";
 import { user1, } from "../fixtures/users";
 
@@ -55,28 +56,7 @@ describe('Basic tests with the Email OTP authenticator', () => {
 });
 
 function fetchOtpEmail(toEmail) {
-    return cy
-        .request({
-            method: 'GET',
-            url: mailhogBaseUrl + '/api/v2/messages',
-            retryOnStatusCodeFailure: true,
-        })
-        .then((res) => {
-            const messages = res.body.items
-
-            const mail = messages.find((msg) => {
-                const to = msg.To.map((t) => t.Mailbox + '@' + t.Domain)
-                const subject = msg.Content.Headers.Subject?.[0] || ''
-
-                return (
-                    to.includes(toEmail) &&
-                    subject.includes('Your access code for')
-                )
-            })
-
-            expect(mail, 'otp email').to.exist
-            return mail
-        })
+    return waitForMail(toEmail, 'Your access code for', 'otp email')
 }
 
 function extractOtpCode(body) {
